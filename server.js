@@ -52,7 +52,8 @@ async function sendWhatsAppMessage(phone, message) {
 
 // ==================== TELEGRAM NOTIFICATION ====================
 // Bot: @VegFresh_bot | Token obtained from @BotFather
-
+const TELEGRAM_BOT_TOKEN = '8790686895:AAHc_g8wqH6nHajgt2RSuTaDXcPRRdjoX84';
+const TELEGRAM_CHAT_ID = '853947915'; // Your Telegram chat ID from @userinfobot
 
 async function sendTelegramAlert(message) {
     try {
