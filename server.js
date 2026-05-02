@@ -17,43 +17,36 @@ app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(session({ secret: 'dadveggie123', resave: false, saveUninitialized: true, cookie: { secure: false } }));
 
-// ==================== NOTIFICATION FUNCTIONS ====================
+// ==================== GOOGLE SHEETS INTEGRATION ====================
+const GOOGLE_SHEETS_WEBHOOK = 'https://script.google.com/macros/s/AKfycbykckhvkqfYmsinIMyOSCscwHJxjGxBcQWmORiQWHKH_ukerv5ogK5VPMmgYd0oHBAY/exec';
 
-// WhatsApp notification function (using callmebot - free service)
-async function sendWhatsAppNotification(phone, message) {
-    // Callmebot setup:
+async function addToGoogleSheets(customerData) {
+    try {
+        await axios.post(GOOGLE_SHEETS_WEBHOOK, customerData, {
+            headers: { 'Content-Type': 'application/json' }
+        });
+        console.log('✅ Customer data saved to Google Sheets');
+    } catch (e) {
+        console.log('Google Sheets save failed:', e.message);
+    }
+}
+// ==================== WHATSAPP NOTIFICATION FUNCTIONS ====================
+
+async function sendWhatsAppMessage(phone, message) {
+    // Callmebot setup (free)
     // 1. Save +34 644 78 97 39 in your phone as "Callmebot"
     // 2. Send "I allow callmebot to send me messages" to that number
     // 3. Get your API key from callmebot.com
-    const apiKey = 'YOUR_CALLMEBOT_API_KEY'; // Replace with your actual API key
+    const apiKey = 'YOUR_CALLMEBOT_API_KEY'; // Replace with your API key
     const url = `https://api.callmebot.com/whatsapp.php?phone=${phone}&text=${encodeURIComponent(message)}&apikey=${apiKey}`;
     try {
         await axios.get(url);
-        console.log(`✅ WhatsApp notification sent to ${phone}`);
+        console.log(`✅ WhatsApp sent to ${phone}`);
+        return true;
     } catch(e) { 
-        console.log('WhatsApp notify failed:', e.message);
+        console.log('WhatsApp failed:', e.message);
+        return false;
     }
-}
-
-// Telegram notification function (completely free & reliable)
-async function sendTelegramNotification(chatId, message) {
-    // Setup: Create a bot via @BotFather on Telegram
-    // Get your bot token and chat ID
-    const botToken = 'YOUR_BOT_TOKEN'; // Replace with your bot token
-    const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
-    try {
-        await axios.post(url, { chat_id: chatId, text: message });
-        console.log(`✅ Telegram notification sent to ${chatId}`);
-    } catch(e) { 
-        console.log('Telegram notify failed:', e.message);
-    }
-}
-
-// Unified function for customer notifications
-async function notifyCustomer(phone, message) {
-    // Choose one method or both:
-    await sendWhatsAppNotification(phone, message);
-    // await sendTelegramNotification(phone, message);
 }
 
 // ==================== IMAGE UPLOAD ====================
@@ -80,10 +73,8 @@ app.post('/api/upload-image', upload.single('image'), async (req, res) => {
 
 // ==================== DATABASE SETUP ====================
 
-// Open database (creates file if not exists)
 const db = new Database('./vegetable_shop.db');
 
-// Create tables and add columns if missing
 db.exec(`
     CREATE TABLE IF NOT EXISTS products (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -117,24 +108,23 @@ db.exec(`
 
 // Add missing columns safely
 try { db.exec(`ALTER TABLE products ADD COLUMN unit TEXT DEFAULT 'kg';`); } catch (e) {}
+try { db.exec(`ALTER TABLE products ADD COLUMN weight_options TEXT DEFAULT '1kg';`); } catch (e) {}
 try { db.exec(`ALTER TABLE orders ADD COLUMN delivery_slot TEXT;`); } catch (e) {}
 
 // Insert sample vegetables if none exist
 const row = db.prepare('SELECT COUNT(*) as count FROM products').get();
 if (row.count === 0) {
     const veggies = [
-        ['Tomato', 'Fresh red tomatoes', 40, 50, 'https://cdn.pixabay.com/photo/2020/06/01/13/55/tomatoes-5247827_640.jpg', 'Vegetables', 'kg'],
-        ['Potato', 'Farm potatoes', 30, 100, 'https://cdn.pixabay.com/photo/2016/08/11/08/04/potatoes-1585075_640.jpg', 'Vegetables', 'kg'],
-        ['Onion', 'Red onion', 35, 80, 'https://cdn.pixabay.com/photo/2020/07/15/20/38/onion-5409359_640.jpg', 'Vegetables', 'kg'],
-        ['Carrot', 'Organic carrots', 45, 60, 'https://cdn.pixabay.com/photo/2017/06/23/06/04/carrots-2433439_640.jpg', 'Vegetables', 'kg'],
-        ['Spinach', 'Fresh spinach bunch', 25, 30, 'https://cdn.pixabay.com/photo/2016/03/26/16/44/spinach-1280831_640.jpg', 'Vegetables', 'bunch'],
-        ['Cucumber', 'Crisp cucumber', 35, 45, 'https://cdn.pixabay.com/photo/2016/07/24/17/33/cucumber-1538652_640.jpg', 'Vegetables', 'piece']
+        ['Tomato', 'Fresh red tomatoes', 40, 50, 'https://cdn.pixabay.com/photo/2020/06/01/13/55/tomatoes-5247827_640.jpg', 'Vegetables', 'kg', '1kg,500g,250g'],
+        ['Potato', 'Farm potatoes', 30, 100, 'https://cdn.pixabay.com/photo/2016/08/11/08/04/potatoes-1585075_640.jpg', 'Vegetables', 'kg', '1kg,500g,250g'],
+        ['Onion', 'Red onion', 35, 80, 'https://cdn.pixabay.com/photo/2020/07/15/20/38/onion-5409359_640.jpg', 'Vegetables', 'kg', '1kg,500g,250g'],
+        ['Carrot', 'Organic carrots', 45, 60, 'https://cdn.pixabay.com/photo/2017/06/23/06/04/carrots-2433439_640.jpg', 'Vegetables', 'kg', '1kg,500g,250g'],
+        ['Spinach', 'Fresh spinach bunch', 25, 30, 'https://cdn.pixabay.com/photo/2016/03/26/16/44/spinach-1280831_640.jpg', 'Vegetables', 'bunch', '1bunch,2bunch'],
+        ['Cucumber', 'Crisp cucumber', 35, 45, 'https://cdn.pixabay.com/photo/2016/07/24/17/33/cucumber-1538652_640.jpg', 'Vegetables', 'piece', '1pc,2pc,3pc']
     ];
-    const insert = db.prepare(`INSERT INTO products (name, description, price, stock, image_url, category, unit) VALUES (?,?,?,?,?,?,?)`);
+    const insert = db.prepare(`INSERT INTO products (name, description, price, stock, image_url, category, unit, weight_options) VALUES (?,?,?,?,?,?,?,?)`);
     for (const v of veggies) insert.run(v);
 }
-
-// ==================== MIDDLEWARE ====================
 
 function isAdmin(req, res, next) {
     if (req.session && req.session.admin) return next();
@@ -144,7 +134,7 @@ function isAdmin(req, res, next) {
 // ==================== CUSTOMER API ENDPOINTS ====================
 
 app.get('/api/products', (req, res) => {
-    const rows = db.prepare(`SELECT id, name, price, stock, image_url, category, unit FROM products`).all();
+    const rows = db.prepare(`SELECT id, name, price, stock, image_url, category, unit, weight_options FROM products`).all();
     res.json({ products: rows });
 });
 
@@ -170,12 +160,23 @@ app.post('/api/orders', async (req, res) => {
         insertItem.run(orderId, it.productId, it.quantity, it.price);
     }
     
-    // ✅ Send WhatsApp notification to admin about new order
-    const adminPhone = "9029186608"; // Your dad's phone number
-    const orderMessage = `🆕 New Order #${orderId}\nCustomer: ${customerName}\nPhone: ${customerPhone}\nTotal: ₹${total}\nSlot: ${deliverySlot || 'Not selected'}`;
-    await sendWhatsAppNotification(adminPhone, orderMessage);
+    // Save customer to Google Sheets
+    await addToGoogleSheets({
+        orderId,
+        name: customerName,
+        phone: customerPhone,
+        address: customerAddress,
+        total,
+        slot: deliverySlot,
+        date: new Date().toISOString()
+    });
     
-    const UPI_ID = "9029186608@okbizaxis"; // CHANGE TO YOUR DAD'S UPI ID
+    // Send WhatsApp to admin
+    const adminPhone = "919029186608";
+    const orderMessage = `🆕 New Order #${orderId}\nCustomer: ${customerName}\nPhone: ${customerPhone}\nTotal: ₹${total}\nSlot: ${deliverySlot || 'Not selected'}`;
+    await sendWhatsAppMessage(adminPhone, orderMessage);
+    
+    const UPI_ID = "9029186608@okbizaxis";
     const upiUrl = `upi://pay?pa=${UPI_ID}&pn=Dad%20Veg%20Shop&am=${total}&cu=INR&tn=Order%20${orderId}`;
     QRCode.toDataURL(upiUrl, (err, qrDataUrl) => {
         if (err) return res.json({ orderId, totalAmount: total, qrCodeDataURL: null, upiIntentUrl: upiUrl });
@@ -183,11 +184,11 @@ app.post('/api/orders', async (req, res) => {
     });
 });
 
-// Order tracking endpoint
-app.get('/api/order/:id/:phone', (req, res) => {
-    const order = db.prepare(`SELECT id, order_status, payment_status, total_amount, delivery_slot FROM orders WHERE id = ? AND customer_phone = ?`).get(req.params.id, req.params.phone);
-    if (!order) return res.status(404).json({ error: 'Order not found' });
-    res.json(order);
+// Track orders by phone only (returns all orders for that phone)
+app.get('/api/orders/:phone', (req, res) => {
+    const orders = db.prepare(`SELECT id, order_status, payment_status, total_amount, delivery_slot, created_at FROM orders WHERE customer_phone = ? ORDER BY id DESC`).all(req.params.phone);
+    if (!orders || orders.length === 0) return res.status(404).json({ error: 'No orders found for this number' });
+    res.json(orders);
 });
 
 // ==================== ADMIN API ENDPOINTS ====================
@@ -209,16 +210,16 @@ app.get('/api/admin/products', isAdmin, (req, res) => {
 });
 
 app.post('/api/admin/products', isAdmin, (req, res) => {
-    const { name, description, price, stock, image_url, category, unit } = req.body;
-    const insert = db.prepare(`INSERT INTO products (name, description, price, stock, image_url, category, unit) VALUES (?,?,?,?,?,?,?)`);
-    const result = insert.run(name, description, price, stock, image_url || '', category, unit || 'kg');
+    const { name, description, price, stock, image_url, category, unit, weight_options } = req.body;
+    const insert = db.prepare(`INSERT INTO products (name, description, price, stock, image_url, category, unit, weight_options) VALUES (?,?,?,?,?,?,?,?)`);
+    const result = insert.run(name, description, price, stock, image_url || '', category, unit || 'kg', weight_options || '1kg');
     res.json({ id: result.lastInsertRowid });
 });
 
 app.put('/api/admin/products/:id', isAdmin, (req, res) => {
-    const { name, description, price, stock, image_url, category, unit } = req.body;
-    const update = db.prepare(`UPDATE products SET name=?, description=?, price=?, stock=?, image_url=?, category=?, unit=? WHERE id=?`);
-    update.run(name, description, price, stock, image_url, category, unit || 'kg', req.params.id);
+    const { name, description, price, stock, image_url, category, unit, weight_options } = req.body;
+    const update = db.prepare(`UPDATE products SET name=?, description=?, price=?, stock=?, image_url=?, category=?, unit=?, weight_options=? WHERE id=?`);
+    update.run(name, description, price, stock, image_url, category, unit || 'kg', weight_options || '1kg', req.params.id);
     res.json({ updated: true });
 });
 
@@ -237,10 +238,10 @@ app.get('/api/admin/orders', isAdmin, (req, res) => {
     res.json(orders);
 });
 
-// ✅ Updated payment confirmation with customer notification
+// Confirm payment and send WhatsApp - Order Confirmed
 app.put('/api/admin/orders/:id/pay', isAdmin, async (req, res) => {
     const orderId = req.params.id;
-    const order = db.prepare(`SELECT payment_status, customer_name, customer_phone FROM orders WHERE id = ?`).get(orderId);
+    const order = db.prepare(`SELECT payment_status, customer_name, customer_phone, total_amount FROM orders WHERE id = ?`).get(orderId);
     if (!order) return res.status(404).json({ error: 'Order not found' });
     if (order.payment_status === 'paid') return res.json({ message: 'Already paid' });
     
@@ -254,19 +255,28 @@ app.put('/api/admin/orders/:id/pay', isAdmin, async (req, res) => {
     }
     db.prepare(`UPDATE orders SET payment_status = 'paid', order_status = 'confirmed' WHERE id = ?`).run(orderId);
     
-    // ✅ Notify customer - Payment confirmed
-    await notifyCustomer(order.customer_phone, `✅ Payment received for Order #${orderId}. Your order is confirmed and will be prepared soon. - Dad's Veggie Shop`);
+    // Send WhatsApp - Order Confirmed to customer
+    await sendWhatsAppMessage(order.customer_phone, `✅ Order #${orderId} CONFIRMED!\nAmount: ₹${order.total_amount}\nYour order will be prepared and dispatched soon. - Dad's Veggie Shop`);
     
     res.json({ success: true });
 });
 
-// ✅ Updated delivery status with customer notification
+// Mark as dispatched and send WhatsApp
+app.put('/api/admin/orders/:id/dispatch', isAdmin, async (req, res) => {
+    const order = db.prepare(`SELECT customer_name, customer_phone, total_amount FROM orders WHERE id = ?`).get(req.params.id);
+    db.prepare(`UPDATE orders SET order_status = 'dispatched' WHERE id = ?`).run(req.params.id);
+    
+    await sendWhatsAppMessage(order.customer_phone, `🚚 Order #${req.params.id} DISPATCHED!\nTotal: ₹${order.total_amount}\nYour order is on the way! - Dad's Veggie Shop`);
+    
+    res.json({ success: true });
+});
+
+// Mark as delivered and send WhatsApp
 app.put('/api/admin/orders/:id/deliver', isAdmin, async (req, res) => {
-    const order = db.prepare(`SELECT customer_name, customer_phone FROM orders WHERE id = ?`).get(req.params.id);
+    const order = db.prepare(`SELECT customer_name, customer_phone, total_amount FROM orders WHERE id = ?`).get(req.params.id);
     db.prepare(`UPDATE orders SET order_status = 'delivered' WHERE id = ?`).run(req.params.id);
     
-    // ✅ Notify customer - Order delivered
-    await notifyCustomer(order.customer_phone, `🚚 Order #${req.params.id} has been delivered! Thank you for shopping with Dad's Veggie Shop. Enjoy your fresh vegetables! 🥬`);
+    await sendWhatsAppMessage(order.customer_phone, `🎉 Order #${req.params.id} DELIVERED!\nTotal: ₹${order.total_amount}\nThank you for shopping with Dad's Veggie Shop! 🥬`);
     
     res.json({ success: true });
 });
