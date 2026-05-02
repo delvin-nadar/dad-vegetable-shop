@@ -95,7 +95,7 @@ app.post('/api/orders', async (req, res) => {
         insertItem.run(orderId, it.productId, it.quantity, it.price);
     }
     
-    const UPI_ID = "dadveggieshop@okhdfcbank"; // CHANGE TO YOUR DAD'S UPI ID
+    const UPI_ID = "9029186608@okbizaxis"; // CHANGE TO YOUR DAD'S UPI ID
     const upiUrl = `upi://pay?pa=${UPI_ID}&pn=Dad%20Veg%20Shop&am=${total}&cu=INR&tn=Order%20${orderId}`;
     QRCode.toDataURL(upiUrl, (err, qrDataUrl) => {
         if (err) return res.json({ orderId, totalAmount: total, qrCodeDataURL: null });
