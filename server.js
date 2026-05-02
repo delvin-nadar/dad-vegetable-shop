@@ -18,7 +18,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use(session({ secret: 'dadveggie123', resave: false, saveUninitialized: true, cookie: { secure: false } }));
 
 // ==================== GOOGLE SHEETS INTEGRATION ====================
-const GOOGLE_SHEETS_WEBHOOK = 'https://script.google.com/macros/s/AKfycbykckhvkqfYmsinIMyOSCscwHJxjGxBcQWmORiQWHKH_ukerv5ogK5VPMmgYd0oHBAY/exec';
+const GOOGLE_SHEETS_WEBHOOK = 'https://script.google.com/macros/s/AKfycbzeQ_XWvNtpcbcjIS3nMIQf6UJ9_uLSdzgF9U5y_wWnaIe3E9FCjEghUyPVWQP3IUDU/exec';
 
 async function addToGoogleSheets(customerData) {
     try {
