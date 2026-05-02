@@ -32,7 +32,9 @@
         footer { text-align: center; margin-top: 3rem; padding: 1.5rem; background: #eaf7e1; }
         .delivery-info, .shop-location, .bulk-order-note { margin: 15px 0; }
         .whatsapp-float { position: fixed; bottom: 20px; right: 20px; background-color: #25D366; color: white; border-radius: 50px; padding: 12px 20px; text-decoration: none; font-weight: bold; box-shadow: 2px 2px 5px rgba(0,0,0,0.3); z-index: 1000; display: flex; align-items: center; gap: 8px; }
-        @media (max-width: 700px) { .cart-sidebar { width: 100%; right: -100%; } }
+        .order-tracking { margin: 20px 0; padding: 15px; background: #f5f5f5; border-radius: 16px; }
+        .order-tracking input { width: auto; display: inline-block; margin-right: 10px; }
+        @media (max-width: 700px) { .cart-sidebar { width: 100%; right: -100%; } .order-tracking input { width: 100%; margin-bottom: 10px; } }
         input, textarea, select { width: 100%; padding: 0.5rem; margin: 0.5rem 0; border-radius: 20px; border: 1px solid #ccc; }
         button { border: none; background: none; cursor: pointer; }
     </style>
@@ -52,6 +54,16 @@
     <div class="bulk-order-note" style="background:#fff3cd; padding:10px; border-radius:8px; margin:10px 0; text-align:center;">
         🍽️ <strong>We take bulk orders for Caterers/Restaurants</strong> — Contact us for wholesale pricing!
     </div>
+    
+    <!-- Order Tracking Section -->
+    <div class="order-tracking">
+        <h3>🔍 Track Your Order</h3>
+        <input type="text" id="trackOrderId" placeholder="Enter Order ID" style="width:200px;">
+        <input type="tel" id="trackPhone" placeholder="Phone Number" style="width:200px;">
+        <button onclick="trackOrder()" style="background:#2e7d32; color:white; padding:8px 20px; border-radius:40px;">Track</button>
+        <div id="trackResult" style="margin-top:10px;"></div>
+    </div>
+    
     <div class="category-filters" id="categoryFilters">
         <button onclick="filterProducts('all')">All</button>
         <button onclick="filterProducts('Vegetables')">🥬 Fresh Produce</button>
@@ -83,8 +95,12 @@
         </select>
     </div>
     <div id="qrPaymentSection" style="display:none;">
-        <div class="qr-area"><img id="qrCodeImg" style="width:180px;"></div>
-        <p>Scan QR with any UPI app. Order ID: <strong id="orderIdSpan"></strong><br>Amount: ₹<span id="orderAmountSpan"></span></p>
+        <div class="qr-area">
+            <img id="qrCodeImg" style="width:180px;">
+            <p style="margin-top:10px;">or</p>
+            <button id="payWithAppBtn" style="background:#2e7d32; color:white; padding:10px; border-radius:40px;">📱 Pay with UPI App</button>
+        </div>
+        <p>Scan QR or click above to pay. Order ID: <strong id="orderIdSpan"></strong><br>Amount: ₹<span id="orderAmountSpan"></span></p>
         <button id="closeModalBtn" style="background:#4caf50; padding:0.6rem; border-radius:40px; color:white;">Close</button>
     </div>
     <div id="checkoutFormSection">
@@ -103,6 +119,7 @@
     let allProducts = [];
     let cart = [];
     let currentFilter = 'all';
+    let currentUpiIntentUrl = '';
 
     const productsContainer = document.getElementById('productsContainer');
     const cartSidebar = document.getElementById('cartSidebar');
@@ -141,7 +158,7 @@
         renderProducts(allProducts);
     }
 
-    // Render products with category filter
+    // Render products with category filter and unit display
     function renderProducts(productsToRender) {
         if (!productsToRender.length) {
             productsContainer.innerHTML = '<p>No vegetables available currently. Check back later!</p>';
@@ -151,13 +168,14 @@
             const inCartQty = cart.find(item => item.productId === p.id)?.quantity || 0;
             const availableStock = p.stock - inCartQty;
             const disabled = availableStock <= 0 || p.stock <= 0;
+            const unitDisplay = p.unit || 'kg';
             return `
                 <div class="product-card">
                     <img class="product-img" src="${p.image_url || 'https://via.placeholder.com/150?text=Veg'}" alt="${p.name}">
                     <div class="product-name">${p.name}</div>
-                    <div class="product-price">₹${p.price}/kg</div>
+                    <div class="product-price">₹${p.price}/${unitDisplay}</div>
                     <div class="product-category">${p.category || 'Vegetables'}</div>
-                    <div style="font-size:0.75rem; background:#f1f8e9; display:inline-block; padding:0.2rem 0.8rem; border-radius:30px;">${p.stock > 0 ? `In stock: ${p.stock} kg` : 'Out of stock'}</div>
+                    <div style="font-size:0.75rem; background:#f1f8e9; display:inline-block; padding:0.2rem 0.8rem; border-radius:30px;">${p.stock > 0 ? `In stock: ${p.stock} ${unitDisplay}` : 'Out of stock'}</div>
                     <button class="add-btn" data-id="${p.id}" data-name="${p.name}" data-price="${p.price}" data-stock="${p.stock}" ${disabled?'disabled':''}>Add to Cart</button>
                 </div>
             `;
@@ -166,7 +184,7 @@
             btn.addEventListener('click', () => {
                 let id = parseInt(btn.dataset.id), name = btn.dataset.name, price = parseFloat(btn.dataset.price), stock = parseInt(btn.dataset.stock);
                 let existing = cart.find(i=>i.productId===id);
-                if(existing && existing.quantity+1 > stock) return alert('Only '+stock+' kg left');
+                if(existing && existing.quantity+1 > stock) return alert('Only '+stock+' left');
                 if(existing) existing.quantity++;
                 else cart.push({productId:id,name,price,quantity:1,stock});
                 updateCartUI();
@@ -185,7 +203,7 @@
             renderProducts(filtered);
         }
     }
-    window.filterProducts = filterProducts; // make globally accessible
+    window.filterProducts = filterProducts;
 
     // Cart sidebar controls
     document.getElementById('cartIcon').onclick = () => cartSidebar.classList.add('open');
@@ -197,7 +215,7 @@
         document.getElementById('checkoutFormSection').style.display='block';
     };
 
-    // Place order
+    // Place order with loading state and success message
     document.getElementById('placeOrderBtn').onclick = async () => {
         let name = document.getElementById('customerName').value.trim();
         let phone = document.getElementById('customerPhone').value.trim();
@@ -210,6 +228,11 @@
         const deliveryCharge = calculateDelivery(subtotal);
         const totalAmount = subtotal + deliveryCharge;
         
+        // Show loading
+        const placeBtn = document.getElementById('placeOrderBtn');
+        placeBtn.textContent = 'Processing...';
+        placeBtn.disabled = true;
+        
         let payload = {
             customerName: name,
             customerPhone: phone,
@@ -219,23 +242,77 @@
             totalAmount: totalAmount
         };
         
-        let res = await fetch('/api/orders', {
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify(payload)
-        });
-        let data = await res.json();
-        if(!res.ok) return alert(data.error);
-        document.getElementById('orderIdSpan').innerText = data.orderId;
-        document.getElementById('orderAmountSpan').innerText = data.totalAmount;
-        document.getElementById('qrCodeImg').src = data.qrCodeDataURL;
-        document.getElementById('qrPaymentSection').style.display = 'block';
-        document.getElementById('checkoutFormSection').style.display = 'none';
-        cart = [];
-        updateCartUI();
-        renderProducts(allProducts);
+        try {
+            let res = await fetch('/api/orders', {
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body:JSON.stringify(payload)
+            });
+            let data = await res.json();
+            if(!res.ok) return alert(data.error);
+            
+            // Show success message with order details
+            alert(`✅ Order Confirmed!\n\nOrder ID: ${data.orderId}\nTotal: ₹${data.totalAmount}\n\nYou can pay now using the QR code.`);
+            
+            // Store UPI intent URL for redirect
+            currentUpiIntentUrl = data.upiIntentUrl;
+            
+            document.getElementById('orderIdSpan').innerText = data.orderId;
+            document.getElementById('orderAmountSpan').innerText = data.totalAmount;
+            document.getElementById('qrCodeImg').src = data.qrCodeDataURL;
+            document.getElementById('qrPaymentSection').style.display = 'block';
+            document.getElementById('checkoutFormSection').style.display = 'none';
+            
+            // Clear cart
+            cart = [];
+            updateCartUI();
+            renderProducts(allProducts);
+        } catch (err) {
+            alert('Network error. Please try again.');
+        } finally {
+            placeBtn.textContent = 'Place Order & Get QR';
+            placeBtn.disabled = false;
+        }
     };
-    document.getElementById('closeModalBtn').onclick = () => orderModal.classList.remove('open');
+
+    // Close modal with thank you message
+    document.getElementById('closeModalBtn').onclick = () => {
+        orderModal.classList.remove('open');
+        alert('🙏 Thank you for your order! You will receive updates via WhatsApp.');
+    };
+
+    // Pay with UPI App redirect
+    document.getElementById('payWithAppBtn')?.addEventListener('click', () => {
+        if (currentUpiIntentUrl) {
+            window.location.href = currentUpiIntentUrl;
+        }
+    });
+
+    // Order tracking function
+    window.trackOrder = async function() {
+        const orderId = document.getElementById('trackOrderId').value;
+        const phone = document.getElementById('trackPhone').value;
+        if (!orderId || !phone) return alert('Enter Order ID and Phone');
+        
+        const res = await fetch(`/api/order/${orderId}/${phone}`);
+        const data = await res.json();
+        if (data.error) return alert('Order not found');
+        
+        const statusMap = {
+            'pending': '⏳ Pending payment',
+            'confirmed': '✅ Payment confirmed, preparing order',
+            'delivered': '🚚 Delivered! Enjoy your vegetables'
+        };
+        document.getElementById('trackResult').innerHTML = `
+            <div style="background:#e8f5e9; padding:15px; border-radius:12px;">
+                <strong>Order #${data.orderId}</strong><br>
+                Status: ${statusMap[data.order_status] || data.order_status}<br>
+                Payment: ${data.payment_status}<br>
+                Total: ₹${data.total_amount}<br>
+                Delivery Slot: ${data.delivery_slot || 'Not selected'}
+            </div>
+        `;
+    };
 
     // Initial load
     loadProducts();
