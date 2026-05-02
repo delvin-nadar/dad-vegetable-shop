@@ -7,17 +7,27 @@ const bodyParser = require('body-parser');
 const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage() });
 const axios = require('axios');
+const FormData = require('form-data'); // ✅ Added missing import
 
-// Image upload endpoint
+const app = express();
+const PORT = process.env.PORT || 3000;
+const HOST = '0.0.0.0';
+
+app.use(bodyParser.json());
+app.use(express.static(path.join(__dirname, 'public')));
+app.use(session({ secret: 'dadveggie123', resave: false, saveUninitialized: true, cookie: { secure: false } }));
+
+// ✅ Moved image upload endpoint after app is defined
 app.post('/api/upload-image', upload.single('image'), async (req, res) => {
     try {
+        if (!req.file) return res.status(400).json({ success: false, error: 'No image file' });
         const formData = new FormData();
         formData.append('image', req.file.buffer.toString('base64'));
         
         const response = await axios.post('https://api.imgur.com/3/image', formData, {
             headers: {
-                'Authorization': 'Client-ID YOUR_IMGUR_CLIENT_ID',
-                'Content-Type': 'multipart/form-data'
+                ...formData.getHeaders(),
+                'Authorization': 'Client-ID YOUR_IMGUR_CLIENT_ID'
             }
         });
         
@@ -28,18 +38,10 @@ app.post('/api/upload-image', upload.single('image'), async (req, res) => {
     }
 });
 
-const app = express();
-const PORT = process.env.PORT || 3000;
-const HOST = '0.0.0.0';
-
-app.use(bodyParser.json());
-app.use(express.static(path.join(__dirname, 'public')));
-app.use(session({ secret: 'dadveggie123', resave: false, saveUninitialized: true, cookie: { secure: false } }));
-
 // Open database (creates file if not exists)
 const db = new Database('./vegetable_shop.db');
 
-// Create tables
+// Create tables and add delivery_slot column if missing
 db.exec(`
     CREATE TABLE IF NOT EXISTS products (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -71,16 +73,21 @@ db.exec(`
     );
 `);
 
+// ✅ Add delivery_slot column to orders table (safe, ignores error if already exists)
+try {
+    db.exec(`ALTER TABLE orders ADD COLUMN delivery_slot TEXT;`);
+} catch (e) { /* column already exists */ }
+
 // Insert sample vegetables if none exist
 const row = db.prepare('SELECT COUNT(*) as count FROM products').get();
 if (row.count === 0) {
     const veggies = [
-        ['Tomato', 'Fresh red tomatoes', 40, 50, 'https://cdn.pixabay.com/photo/2020/06/01/13/55/tomatoes-5247827_640.jpg', 'Vegetable'],
-        ['Potato', 'Farm potatoes', 30, 100, 'https://cdn.pixabay.com/photo/2016/08/11/08/04/potatoes-1585075_640.jpg', 'Root'],
-        ['Onion', 'Red onion', 35, 80, 'https://cdn.pixabay.com/photo/2020/07/15/20/38/onion-5409359_640.jpg', 'Vegetable'],
-        ['Carrot', 'Organic carrots', 45, 60, 'https://cdn.pixabay.com/photo/2017/06/23/06/04/carrots-2433439_640.jpg', 'Root'],
-        ['Spinach', 'Fresh spinach bunch', 25, 30, 'https://cdn.pixabay.com/photo/2016/03/26/16/44/spinach-1280831_640.jpg', 'Leafy'],
-        ['Cucumber', 'Crisp cucumber', 35, 45, 'https://cdn.pixabay.com/photo/2016/07/24/17/33/cucumber-1538652_640.jpg', 'Vegetable']
+        ['Tomato', 'Fresh red tomatoes', 40, 50, 'https://cdn.pixabay.com/photo/2020/06/01/13/55/tomatoes-5247827_640.jpg', 'Vegetables'],
+        ['Potato', 'Farm potatoes', 30, 100, 'https://cdn.pixabay.com/photo/2016/08/11/08/04/potatoes-1585075_640.jpg', 'Vegetables'],
+        ['Onion', 'Red onion', 35, 80, 'https://cdn.pixabay.com/photo/2020/07/15/20/38/onion-5409359_640.jpg', 'Vegetables'],
+        ['Carrot', 'Organic carrots', 45, 60, 'https://cdn.pixabay.com/photo/2017/06/23/06/04/carrots-2433439_640.jpg', 'Vegetables'],
+        ['Spinach', 'Fresh spinach bunch', 25, 30, 'https://cdn.pixabay.com/photo/2016/03/26/16/44/spinach-1280831_640.jpg', 'Vegetables'],
+        ['Cucumber', 'Crisp cucumber', 35, 45, 'https://cdn.pixabay.com/photo/2016/07/24/17/33/cucumber-1538652_640.jpg', 'Vegetables']
     ];
     const insert = db.prepare(`INSERT INTO products (name, description, price, stock, image_url, category) VALUES (?,?,?,?,?,?)`);
     for (const v of veggies) insert.run(v);
@@ -92,12 +99,13 @@ function isAdmin(req, res, next) {
 }
 
 app.get('/api/products', (req, res) => {
-    const rows = db.prepare(`SELECT id, name, price, stock, image_url FROM products`).all();
+    const rows = db.prepare(`SELECT id, name, price, stock, image_url, category FROM products`).all();
     res.json({ products: rows });
 });
 
+// ✅ Updated orders endpoint to accept deliverySlot and totalAmount (already includes delivery charge)
 app.post('/api/orders', async (req, res) => {
-    const { customerName, customerPhone, customerAddress, items } = req.body;
+    const { customerName, customerPhone, customerAddress, items, deliverySlot, totalAmount } = req.body;
     if (!items || items.length === 0) return res.status(400).json({ error: 'No items' });
     
     // Check stock
@@ -108,9 +116,10 @@ app.post('/api/orders', async (req, res) => {
         }
     }
     
-    const total = items.reduce((s, i) => s + i.price * i.quantity, 0);
-    const insertOrder = db.prepare(`INSERT INTO orders (customer_name, customer_phone, customer_address, total_amount) VALUES (?,?,?,?)`);
-    const result = insertOrder.run(customerName, customerPhone, customerAddress, total);
+    // Use totalAmount provided by client (includes delivery charge)
+    const total = totalAmount || items.reduce((s, i) => s + i.price * i.quantity, 0);
+    const insertOrder = db.prepare(`INSERT INTO orders (customer_name, customer_phone, customer_address, total_amount, delivery_slot) VALUES (?,?,?,?,?)`);
+    const result = insertOrder.run(customerName, customerPhone, customerAddress, total, deliverySlot || null);
     const orderId = result.lastInsertRowid;
     
     const insertItem = db.prepare(`INSERT INTO order_items (order_id, product_id, quantity, price) VALUES (?,?,?,?)`);
@@ -204,11 +213,11 @@ app.get('/admin-page', (req, res) => {
     if (req.session && req.session.admin) {
         res.sendFile(path.join(__dirname, 'public', 'admin.html'));
     } else {
-        res.send(`<html><body><h2>Admin Login</h2><form id="login"><input type="password" id="pwd" placeholder="Password"><button type="submit">Login</button></form><p>Default password: admin123</p><script>document.getElementById('login').onsubmit=async(e)=>{e.preventDefault();let r=await fetch('/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:document.getElementById('pwd').value})});if(r.ok)location.reload();else alert('Wrong password');};<\/script></body></html>`);
+        res.send(`<html><body><h2>Admin Login</h2><form id="login"><input type="password" id="pwd" placeholder="Password"><button type="submit">Login</button></form><script>document.getElementById('login').onsubmit=async(e)=>{e.preventDefault();let r=await fetch('/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:document.getElementById('pwd').value})});if(r.ok)location.reload();else alert('Wrong password');};<\/script></body></html>`);
     }
 });
 
 app.listen(PORT, HOST, () => {
     console.log(`✅ Veggie Shop running on http://${HOST}:${PORT}`);
-    console.log(`👉 Admin panel: http://${HOST}:${PORT}/admin-page (password: admin123)`);
+    console.log(`👉 Admin panel: http://${HOST}:${PORT}/admin-page (password: Pass@6073)`);
 });
