@@ -4,6 +4,29 @@ const path = require('path');
 const session = require('express-session');
 const QRCode = require('qrcode');
 const bodyParser = require('body-parser');
+const multer = require('multer');
+const upload = multer({ storage: multer.memoryStorage() });
+const axios = require('axios');
+
+// Image upload endpoint
+app.post('/api/upload-image', upload.single('image'), async (req, res) => {
+    try {
+        const formData = new FormData();
+        formData.append('image', req.file.buffer.toString('base64'));
+        
+        const response = await axios.post('https://api.imgur.com/3/image', formData, {
+            headers: {
+                'Authorization': 'Client-ID YOUR_IMGUR_CLIENT_ID',
+                'Content-Type': 'multipart/form-data'
+            }
+        });
+        
+        res.json({ success: true, url: response.data.data.link });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, error: 'Upload failed' });
+    }
+});
 
 const app = express();
 const PORT = process.env.PORT || 3000;
