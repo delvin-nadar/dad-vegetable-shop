@@ -42,10 +42,10 @@
         .status-dispatched { background: #d4edda; color: #155724; }
         .status-delivered { background: #d1ecf1; color: #0c5460; }
         .added-to-cart-badge { position: absolute; top: 10px; right: 10px; background: #ff9800; color: white; padding: 4px 8px; border-radius: 20px; font-size: 10px; font-weight: bold; }
+        .quantity-select { width: 80px; padding: 5px; margin: 5px; border-radius: 20px; border: 1px solid #ccc; display: inline-block; }
         @media (max-width: 700px) { .cart-sidebar { width: 100%; right: -100%; } .order-tracking input { width: 100%; margin-bottom: 10px; } }
         input, textarea, select { width: 100%; padding: 0.5rem; margin: 0.5rem 0; border-radius: 20px; border: 1px solid #ccc; }
         button { border: none; background: none; cursor: pointer; }
-        .weight-select { width: auto; display: inline-block; margin: 5px; padding: 4px 8px; font-size: 12px; }
     </style>
 </head>
 <body>
@@ -67,7 +67,7 @@
     <!-- Order Tracking Section - Phone Only -->
     <div class="order-tracking">
         <h3>🔍 Track Your Orders</h3>
-        <input type="tel" id="trackPhone" placeholder="Enter Phone Number" style="width:250px;">
+        <input type="tel" id="trackPhone" placeholder="Enter 10-digit Mobile Number" maxlength="10" pattern="[0-9]{10}" style="width:250px;">
         <button onclick="trackOrders()" style="background:#2e7d32; color:white; padding:8px 20px; border-radius:40px;">Track Orders</button>
         <div id="trackResult" style="margin-top:15px;"></div>
     </div>
@@ -92,7 +92,7 @@
 <div class="order-modal" id="orderModal">
     <h3>📝 Delivery Details</h3>
     <input type="text" id="customerName" placeholder="Full Name" required>
-    <input type="tel" id="customerPhone" placeholder="Phone Number" required>
+    <input type="tel" id="customerPhone" placeholder="10-digit Mobile Number" maxlength="10" pattern="[0-9]{10}" required>
     <textarea id="customerAddress" rows="2" placeholder="Delivery Address"></textarea>
     <div class="delivery-slots">
         <label>📅 Delivery Slots:</label>
@@ -128,17 +128,43 @@
     let cart = [];
     let currentFilter = 'all';
     let currentUpiIntentUrl = '';
+    let historyStack = [];
 
     const productsContainer = document.getElementById('productsContainer');
     const cartSidebar = document.getElementById('cartSidebar');
     const orderModal = document.getElementById('orderModal');
+
+    // Track navigation history for double back exit
+    function pushHistory() {
+        historyStack.push(window.location.href);
+        if (historyStack.length > 2) historyStack.shift();
+    }
+    pushHistory();
+
+    // Double back exit
+    window.addEventListener('popstate', function() {
+        if (cartSidebar.classList.contains('open')) {
+            cartSidebar.classList.remove('open');
+            pushHistory();
+        } else if (orderModal.classList.contains('open')) {
+            orderModal.classList.remove('open');
+            pushHistory();
+        } else {
+            if (historyStack.length === 1) {
+                alert('Press back again to exit');
+                pushHistory();
+            } else {
+                history.back();
+            }
+        }
+    });
 
     // Helper: delivery charge calculation
     function calculateDelivery(totalAmount) {
         return totalAmount >= 100 ? 0 : 30;
     }
 
-    // Update cart UI with subtotal, delivery, total
+    // Update cart UI
     function updateCartUI() {
         const subtotal = cart.reduce((s, i) => s + (i.price * i.quantity), 0);
         const delivery = calculateDelivery(subtotal);
@@ -150,7 +176,7 @@
         
         let html = cart.map((item, idx) => `
             <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
-                ${item.name} x${item.quantity} = ₹${(item.price * item.quantity).toFixed(2)}
+                ${item.name} (${item.weight || item.unit}) x${item.quantity} = ₹${(item.price * item.quantity).toFixed(2)}
                 <button onclick="removeItem(${idx})" style="background:#e53935; color:white; border-radius:30px; padding:2px 10px;">Remove</button>
             </div>
         `).join('');
@@ -158,7 +184,7 @@
     }
     window.removeItem = (idx) => { cart.splice(idx,1); updateCartUI(); renderProducts(allProducts); };
 
-    // Load products from API
+    // Load products
     async function loadProducts() {
         const res = await fetch('/api/products');
         const data = await res.json();
@@ -166,18 +192,16 @@
         renderProducts(allProducts);
     }
 
-    // Check if product is in cart
     function isInCart(productId) {
         return cart.some(item => item.productId === productId);
     }
 
-    // Get cart quantity for a product
     function getCartQuantity(productId) {
         const item = cart.find(item => item.productId === productId);
         return item ? item.quantity : 0;
     }
 
-    // Render products with category filter, unit display, and cart status
+    // Render products without stock display
     function renderProducts(productsToRender) {
         if (!productsToRender.length) {
             productsContainer.innerHTML = '<p>No vegetables available currently. Check back later!</p>';
@@ -185,10 +209,25 @@
         }
         productsContainer.innerHTML = productsToRender.map(p => {
             const inCartQty = getCartQuantity(p.id);
-            const availableStock = p.stock - inCartQty;
-            const disabled = availableStock <= 0 || p.stock <= 0;
             const unitDisplay = p.unit || 'kg';
             const inCart = inCartQty > 0;
+            
+            // Generate weight options dropdown based on unit
+            let weightHtml = '';
+            if (unitDisplay === 'kg') {
+                weightHtml = `<select class="weight-select" data-id="${p.id}">
+                    <option value="250g">250g</option>
+                    <option value="500g">500g</option>
+                    <option value="1kg" selected>1kg</option>
+                </select>`;
+            } else if (unitDisplay === 'piece' || unitDisplay === 'bunch' || unitDisplay === 'packet') {
+                weightHtml = `<select class="weight-select" data-id="${p.id}">
+                    ${[...Array(15)].map((_, i) => `<option value="${i+1}${unitDisplay === 'piece' ? 'pc' : unitDisplay === 'bunch' ? 'bunch' : 'packet'}">${i+1} ${unitDisplay}${i > 0 ? 's' : ''}</option>`).join('')}
+                </select>`;
+            } else {
+                weightHtml = `<input type="number" class="weight-select" data-id="${p.id}" placeholder="Quantity" min="0.25" step="0.25" value="1">`;
+            }
+            
             return `
                 <div class="product-card">
                     ${inCart ? '<div class="added-to-cart-badge">✓ Added to Cart</div>' : ''}
@@ -196,27 +235,45 @@
                     <div class="product-name">${p.name}</div>
                     <div class="product-price">₹${p.price}/${unitDisplay}</div>
                     <div class="product-category">${p.category || 'Vegetables'}</div>
-                    <div style="font-size:0.75rem; background:#f1f8e9; display:inline-block; padding:0.2rem 0.8rem; border-radius:30px;">${p.stock > 0 ? `In stock: ${p.stock} ${unitDisplay}` : 'Out of stock'}</div>
-                    <button class="add-btn ${inCart ? 'in-cart' : ''}" data-id="${p.id}" data-name="${p.name}" data-price="${p.price}" data-stock="${p.stock}" ${disabled?'disabled':''}>
+                    ${weightHtml}
+                    <button class="add-btn ${inCart ? 'in-cart' : ''}" data-id="${p.id}" data-name="${p.name}" data-price="${p.price}" data-unit="${unitDisplay}">
                         ${inCart ? `✓ Added (${inCartQty})` : 'Add to Cart'}
                     </button>
                 </div>
             `;
         }).join('');
+        
+        // Attach event listeners to add buttons
         document.querySelectorAll('.add-btn').forEach(btn => {
             btn.addEventListener('click', () => {
-                let id = parseInt(btn.dataset.id), name = btn.dataset.name, price = parseFloat(btn.dataset.price), stock = parseInt(btn.dataset.stock);
-                let existing = cart.find(i=>i.productId===id);
-                if(existing && existing.quantity+1 > stock) return alert('Only '+stock+' left');
-                if(existing) existing.quantity++;
-                else cart.push({productId:id,name,price,quantity:1,stock});
+                let id = parseInt(btn.dataset.id);
+                let name = btn.dataset.name;
+                let basePrice = parseFloat(btn.dataset.price);
+                let unit = btn.dataset.unit;
+                let weightSelect = document.querySelector(`.weight-select[data-id="${id}"]`);
+                let selectedWeight = weightSelect ? weightSelect.value : '1kg';
+                
+                // Calculate price based on weight
+                let price = basePrice;
+                if (selectedWeight === '250g') price = basePrice * 0.25;
+                else if (selectedWeight === '500g') price = basePrice * 0.5;
+                else if (selectedWeight.includes('pc') || selectedWeight.includes('bunch') || selectedWeight.includes('packet')) {
+                    let qty = parseInt(selectedWeight);
+                    price = basePrice * qty;
+                } else if (selectedWeight.includes('kg')) {
+                    let kg = parseFloat(selectedWeight);
+                    price = basePrice * kg;
+                }
+                
+                let existing = cart.find(i => i.productId === id && i.weight === selectedWeight);
+                if (existing) existing.quantity++;
+                else cart.push({ productId: id, name, price, quantity: 1, weight: selectedWeight, unit });
                 updateCartUI();
                 renderProducts(allProducts);
             });
         });
     }
 
-    // Filter products by category
     function filterProducts(category) {
         currentFilter = category;
         if (category === 'all') {
@@ -228,30 +285,37 @@
     }
     window.filterProducts = filterProducts;
 
-    // Cart sidebar controls
-    document.getElementById('cartIcon').onclick = () => cartSidebar.classList.add('open');
+    document.getElementById('cartIcon').onclick = () => { cartSidebar.classList.add('open'); pushHistory(); };
     document.getElementById('closeCartBtn').onclick = () => cartSidebar.classList.remove('open');
     document.getElementById('checkoutBtn').onclick = () => {
         if(cart.length===0) return alert('Cart empty');
         orderModal.classList.add('open');
         document.getElementById('qrPaymentSection').style.display='none';
         document.getElementById('checkoutFormSection').style.display='block';
+        pushHistory();
     };
 
-    // Place order with loading state and success message
+    // Validate 10-digit phone
+    function validatePhone(phone) {
+        return /^\d{10}$/.test(phone);
+    }
+
+    // Place order
     document.getElementById('placeOrderBtn').onclick = async () => {
         let name = document.getElementById('customerName').value.trim();
         let phone = document.getElementById('customerPhone').value.trim();
         let address = document.getElementById('customerAddress').value.trim();
         let deliverySlot = document.getElementById('deliverySlot').value;
-        if(!name||!phone||!address) return alert('Fill all details');
+        
+        if(!name) return alert('Please enter your name');
+        if(!validatePhone(phone)) return alert('Please enter a valid 10-digit mobile number');
+        if(!address) return alert('Please enter delivery address');
         if(!deliverySlot) return alert('Please select a delivery slot');
         
         const subtotal = cart.reduce((s,i)=>s+i.price*i.quantity,0);
         const deliveryCharge = calculateDelivery(subtotal);
         const totalAmount = subtotal + deliveryCharge;
         
-        // Show loading
         const placeBtn = document.getElementById('placeOrderBtn');
         placeBtn.textContent = 'Processing...';
         placeBtn.disabled = true;
@@ -261,7 +325,7 @@
             customerPhone: phone,
             customerAddress: address,
             deliverySlot: deliverySlot,
-            items: cart.map(i=>({productId:i.productId, quantity:i.quantity, price:i.price})),
+            items: cart.map(i=>({productId:i.productId, quantity:i.quantity, price:i.price, weight:i.weight})),
             totalAmount: totalAmount
         };
         
@@ -274,11 +338,9 @@
             let data = await res.json();
             if(!res.ok) return alert(data.error);
             
-            // Show success message with order details
-            alert(`✅ Order Placed!\n\nOrder ID: ${data.orderId}\nTotal: ₹${data.totalAmount}\n\nPlease complete payment using the QR code. Your order will be confirmed after payment.`);
+            alert(`✅ Order Placed!\n\nOrder ID: ${data.orderId}\nTotal: ₹${data.totalAmount}\n\nPlease complete payment using the QR code.`);
             
             currentUpiIntentUrl = data.upiIntentUrl;
-            
             document.getElementById('orderIdSpan').innerText = data.orderId;
             document.getElementById('orderAmountSpan').innerText = data.totalAmount;
             document.getElementById('qrCodeImg').src = data.qrCodeDataURL;
@@ -296,28 +358,21 @@
         }
     };
 
-    // Close modal with thank you message
     document.getElementById('closeModalBtn').onclick = () => {
         orderModal.classList.remove('open');
         alert('🙏 Thank you for your order! You will receive updates on WhatsApp.');
     };
 
-    // Pay with UPI App redirect
     document.getElementById('payWithAppBtn')?.addEventListener('click', () => {
         if (currentUpiIntentUrl) {
             window.location.href = currentUpiIntentUrl;
         }
     });
 
-    // Track orders by phone number only
+    // Track orders by phone number
     window.trackOrders = async function() {
         const phone = document.getElementById('trackPhone').value.trim();
-        if (!phone) return alert('Enter phone number');
-        
-        // Basic phone validation (10 digits)
-        if (!/^\d{10}$/.test(phone)) {
-            return alert('Please enter a valid 10-digit phone number');
-        }
+        if (!validatePhone(phone)) return alert('Please enter a valid 10-digit mobile number');
         
         const res = await fetch(`/api/orders/${phone}`);
         const data = await res.json();
@@ -347,7 +402,6 @@
         document.getElementById('trackResult').innerHTML = html;
     };
 
-    // Initial load
     loadProducts();
 </script>
 </body>
