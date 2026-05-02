@@ -14,6 +14,8 @@
         .status-confirmed { background: #cce5ff; color: #004085; padding: 4px 8px; border-radius: 20px; font-size: 12px; display: inline-block; }
         .status-dispatched { background: #d4edda; color: #155724; padding: 4px 8px; border-radius: 20px; font-size: 12px; display: inline-block; }
         .status-delivered { background: #d1ecf1; color: #0c5460; padding: 4px 8px; border-radius: 20px; font-size: 12px; display: inline-block; }
+        .bulk-upload-section { margin-top: 30px; padding-top: 20px; border-top: 2px solid #4caf50; }
+        .image-preview { max-width: 50px; max-height: 50px; border-radius: 8px; }
     </style>
 </head>
 <body>
@@ -39,7 +41,7 @@
     </select>
     <div class="weight-options">
         <label>Weight Options (comma separated):</label>
-        <input type="text" id="newWeightOptions" placeholder="e.g., 250g,500g,1kg or 1,2,3" value="1kg,500g,250g">
+        <input type="text" id="newWeightOptions" placeholder="e.g., 250g,500g,1kg or 1,2,3" value="250g,500g,1kg">
     </div>
     <select id="newCategory">
         <option value="Vegetables">🥬 Fresh Produce</option>
@@ -47,25 +49,78 @@
         <option value="South Indian">🍛 South Indian</option>
         <option value="Dry Groceries">🍚 Dry Groceries</option>
     </select>
-    <input type="text" id="newImageUrl" placeholder="Image URL" style="width: 300px;">
+    <div style="display: flex; gap: 10px; align-items: center;">
+        <input type="text" id="newImageUrl" placeholder="Image URL" style="flex: 1;">
+        <button type="button" onclick="fetchProductImage()" style="background: #2196f3; color: white; padding: 8px 15px; border-radius: 30px;">
+            🔍 Auto‑fetch Image
+        </button>
+    </div>
     <input type="file" id="imageUpload" accept="image/*">
-    <button onclick="uploadImage()">📤 Upload Image</button>
+    <button onclick="uploadImage()">📤 Upload to Imgur</button>
     <button onclick="addProduct()">➕ Add Product</button>
 </div>
 
+<!-- Bulk Upload Section -->
+<div class="bulk-upload-section">
+    <h3>📤 Bulk Upload Products</h3>
+    <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+        <a href="/api/admin/products/template" download="product_template.csv" 
+           style="background: #2196f3; color: white; padding: 10px 20px; border-radius: 30px; text-decoration: none;">
+           📥 Download CSV Template
+        </a>
+        <form id="bulkUploadForm" enctype="multipart/form-data" style="display: inline-flex; gap: 10px; align-items: center;">
+            <input type="file" id="csvFile" accept=".csv" style="width: auto;">
+            <button type="submit" style="background: #4caf50; color: white; padding: 10px 20px; border-radius: 30px;">
+               📤 Upload & Bulk Add
+            </button>
+        </form>
+    </div>
+    <div id="bulkUploadResult" style="margin-top: 15px; display: none;"></div>
+</div>
+
 <script>
+let ordersData = [];
+
 async function fetchAuth(url, opts={}) {
     const res = await fetch(url, opts);
     if (res.status === 401) { alert("Session expired. Please login again."); location.reload(); }
     return res.json();
 }
 
-let ordersData = [];
+// Auto-fetch image from product name
+async function fetchProductImage() {
+    const productName = document.getElementById('newName').value.trim();
+    if (!productName) {
+        alert('Please enter product name first');
+        return;
+    }
+    
+    const button = event.target;
+    button.textContent = '⏳ Searching...';
+    button.disabled = true;
+    
+    try {
+        const response = await fetch(`/api/search-image/${encodeURIComponent(productName)}`);
+        const data = await response.json();
+        
+        if (data.success) {
+            document.getElementById('newImageUrl').value = data.imageUrl;
+            alert(`✅ Image found on ${data.source}!\nPhoto by: ${data.photographer}\n\nThe image URL has been added.`);
+        } else {
+            alert('No image found. Please add manually or try a different product name.');
+        }
+    } catch (err) {
+        alert('Error fetching image. Please add manually.');
+    } finally {
+        button.textContent = '🔍 Auto‑fetch Image';
+        button.disabled = false;
+    }
+}
 
 async function loadProducts() {
     let data = await fetchAuth('/api/admin/products');
     let html = `<table>
-        <thead><tr><th>ID</th><th>Name</th><th>Price</th><th>Stock</th><th>Unit</th><th>Weight Options</th><th>Category</th><th>Image URL</th><th>Action</th></tr></thead>
+        <thead><tr><th>ID</th><th>Name</th><th>Price</th><th>Stock</th><th>Unit</th><th>Weight Options</th><th>Category</th><th>Image</th><th>Action</th></tr></thead>
         <tbody>`;
     data.forEach(p => {
         html += `<tr>
@@ -79,9 +134,9 @@ async function loadProducts() {
                 <option value="bunch" ${p.unit === 'bunch' ? 'selected' : ''}>bunch</option>
                 <option value="packet" ${p.unit === 'packet' ? 'selected' : ''}>packet</option>
             </select></td>
-            <td><input id="weight${p.id}" value="${p.weight_options || '1kg,500g,250g'}" style="width:120px;"></td>
+            <td><input id="weight${p.id}" value="${p.weight_options || '250g,500g,1kg'}" style="width:120px;"></td>
             <td><input id="cat${p.id}" value="${p.category || ''}"></td>
-            <td><input id="img${p.id}" value="${p.image_url || ''}" style="width:150px;"></td>
+            <td>${p.image_url ? `<img src="${p.image_url}" class="image-preview" onerror="this.style.display='none'">` : 'No image'} <br><input id="img${p.id}" value="${p.image_url || ''}" style="width:150px;"></td>
             <td><button onclick="updateProduct(${p.id})">Update</button> <button onclick="deleteProduct(${p.id})">Delete</button></td>
         </tr>`;
     });
@@ -147,7 +202,7 @@ async function addProduct() {
         document.getElementById('newName').value = '';
         document.getElementById('newPrice').value = '';
         document.getElementById('newStock').value = '';
-        document.getElementById('newWeightOptions').value = '1kg,500g,250g';
+        document.getElementById('newWeightOptions').value = '250g,500g,1kg';
         document.getElementById('newImageUrl').value = '';
         document.getElementById('imageUpload').value = '';
         loadProducts();
@@ -232,6 +287,75 @@ async function logout() {
     await fetch('/admin/logout');
     location.reload();
 }
+
+// Bulk upload handler
+document.getElementById('bulkUploadForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const fileInput = document.getElementById('csvFile');
+    const file = fileInput.files[0];
+    
+    if (!file) {
+        alert('Please select a CSV file');
+        return;
+    }
+    
+    if (!file.name.endsWith('.csv')) {
+        alert('Please upload a CSV file');
+        return;
+    }
+    
+    const formData = new FormData();
+    formData.append('csvFile', file);
+    
+    const resultDiv = document.getElementById('bulkUploadResult');
+    resultDiv.style.display = 'block';
+    resultDiv.innerHTML = '<div style="background:#fff3cd; padding:15px; border-radius:12px;">⏳ Uploading and processing... Please wait.</div>';
+    
+    try {
+        const response = await fetch('/api/admin/products/bulk', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            let html = `<div style="background:#d4edda; padding:15px; border-radius:12px;">
+                <strong>✅ ${data.message}</strong><br>`;
+            
+            if (data.inserted && data.inserted.length > 0) {
+                html += `<br><strong>Added Products:</strong><ul>`;
+                data.inserted.forEach(p => {
+                    html += `<li>#${p.id} - ${p.name}</li>`;
+                });
+                html += `</ul>`;
+            }
+            
+            if (data.errors && data.errors.length > 0) {
+                html += `<br><strong>⚠️ Errors:</strong><ul style="color:#856404;">`;
+                data.errors.forEach(err => {
+                    html += `<li>${err}</li>`;
+                });
+                html += `</ul>`;
+            }
+            
+            html += `</div>`;
+            resultDiv.innerHTML = html;
+            
+            loadProducts();
+            fileInput.value = '';
+        } else {
+            resultDiv.innerHTML = `<div style="background:#f8d7da; padding:15px; border-radius:12px;">
+                <strong>❌ Error:</strong> ${data.error || 'Upload failed'}
+            </div>`;
+        }
+    } catch (err) {
+        resultDiv.innerHTML = `<div style="background:#f8d7da; padding:15px; border-radius:12px;">
+            <strong>❌ Error:</strong> ${err.message}
+        </div>`;
+    }
+});
 
 loadProducts();
 loadOrders();
