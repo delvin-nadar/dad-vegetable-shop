@@ -105,7 +105,7 @@ app.post('/api/orders', async (req, res) => {
 
 app.post('/admin/login', (req, res) => {
     const { password } = req.body;
-    if (password === 'admin123') { // CHANGE THIS PASSWORD
+    if (password === 'Pass@6073') { // CHANGE THIS PASSWORD
         req.session.admin = true;
         return res.json({ success: true });
     }
