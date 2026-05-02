@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dad's Fresh Veggies</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', sans-serif; }
+        body { background: #f8f9fa; }
+        .navbar { background: #2e7d32; color: white; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; }
+        .logo h2 { font-size: 1.8rem; }
+        .cart-icon { background: #ffb74d; padding: 0.5rem 1rem; border-radius: 40px; cursor: pointer; }
+        .container { max-width: 1300px; margin: 2rem auto; padding: 0 1.5rem; }
+        .products-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1.8rem; }
+        .product-card { background: white; border-radius: 24px; padding: 1rem; text-align: center; box-shadow: 0 8px 20px rgba(0,0,0,0.05); }
+        .product-img { width: 100%; height: 150px; object-fit: cover; border-radius: 18px; background: #eef2e6; }
+        .product-name { font-size: 1.4rem; font-weight: 700; margin: 0.7rem 0 0.3rem; }
+        .product-price { font-size: 1.3rem; color: #2e7d32; font-weight: bold; }
+        .add-btn { background: #2e7d32; color: white; border: none; padding: 0.6rem 1.2rem; border-radius: 40px; cursor: pointer; width: 100%; }
+        .add-btn:disabled { background: #aaa; }
+        .cart-sidebar { position: fixed; top: 0; right: -400px; width: 380px; height: 100%; background: white; z-index: 1000; transition: 0.3s; padding: 1.5rem; overflow-y: auto; }
+        .cart-sidebar.open { right: 0; }
+        .checkout-btn { background: #ff9800; width: 100%; padding: 0.8rem; border: none; border-radius: 50px; margin-top: 1rem; cursor: pointer; }
+        .order-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; width: 90%; max-width: 500px; z-index: 1100; border-radius: 28px; padding: 1.8rem; display: none; }
+        .order-modal.open { display: block; }
+        .qr-area { text-align: center; margin: 1rem 0; }
+        .admin-link { background: #ffd966; padding: 0.3rem 0.9rem; border-radius: 30px; text-decoration: none; color: #2d3e2b; }
+        footer { text-align: center; margin-top: 3rem; padding: 1.5rem; background: #eaf7e1; }
+        @media (max-width: 700px) { .cart-sidebar { width: 100%; right: -100%; } }
+    </style>
+</head>
+<body>
+<div class="navbar">
+    <div class="logo"><h2>🥬 Dad's Veggie Shop</h2><p>Farm fresh • Chemical free</p></div>
+    <div style="display: flex; gap: 15px;">
+        <a href="/admin-page" class="admin-link" target="_blank">📦 Admin Panel</a>
+        <div class="cart-icon" id="cartIcon">🛒 Cart (<span id="cartCount">0</span>)</div>
+    </div>
+</div>
+<div class="container">
+    <h2>🌱 Fresh Harvest Today</h2>
+    <div id="productsContainer" class="products-grid">Loading vegetables...</div>
+</div>
+<div class="cart-sidebar" id="cartSidebar">
+    <div class="cart-header"><span>Your Cart</span><span id="closeCartBtn" style="cursor:pointer;">&times;</span></div>
+    <div id="cartItemsList">Cart is empty</div>
+    <div class="cart-total">Total: ₹<span id="cartTotalAmount">0</span></div>
+    <button class="checkout-btn" id="checkoutBtn">🛍️ Proceed to Checkout</button>
+</div>
+<div class="order-modal" id="orderModal">
+    <h3>📝 Delivery Details</h3>
+    <input type="text" id="customerName" placeholder="Full Name"><br>
+    <input type="tel" id="customerPhone" placeholder="Phone Number"><br>
+    <textarea id="customerAddress" rows="2" placeholder="Delivery Address"></textarea>
+    <div id="qrPaymentSection" style="display:none;">
+        <div class="qr-area"><img id="qrCodeImg" style="width:180px;"></div>
+        <p>Scan QR with any UPI app. Order ID: <strong id="orderIdSpan"></strong><br>Amount: ₹<span id="orderAmountSpan"></span></p>
+        <button id="closeModalBtn">Close</button>
+    </div>
+    <div id="checkoutFormSection">
+        <button id="placeOrderBtn" class="checkout-btn">Place Order & Get QR</button>
+    </div>
+</div>
+<footer>🧾 Fresh vegetables delivered | UPI QR payment | Dad's Shop</footer>
+<script>
+    let products = [], cart = [];
+    const productsContainer = document.getElementById('productsContainer');
+    const cartSidebar = document.getElementById('cartSidebar');
+    const orderModal = document.getElementById('orderModal');
+    async function loadProducts() {
+        const res = await fetch('/api/products');
+        const data = await res.json();
+        products = data.products;
+        renderProducts();
+    }
+    function renderProducts() {
+        productsContainer.innerHTML = products.map(p => `
+            <div class="product-card">
+                <img class="product-img" src="${p.image_url || 'https://via.placeholder.com/150?text=Veg'}" alt="${p.name}">
+                <div class="product-name">${p.name}</div>
+                <div class="product-price">₹${p.price}/kg</div>
+                <div class="stock-badge">${p.stock > 0 ? `In stock: ${p.stock} kg` : 'Out of stock'}</div>
+                <button class="add-btn" data-id="${p.id}" data-name="${p.name}" data-price="${p.price}" data-stock="${p.stock}" ${p.stock===0?'disabled':''}>Add to Cart</button>
+            </div>
+        `).join('');
+        document.querySelectorAll('.add-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                let id = parseInt(btn.dataset.id), name = btn.dataset.name, price = parseFloat(btn.dataset.price), stock = parseInt(btn.dataset.stock);
+                let existing = cart.find(i=>i.productId===id);
+                if(existing && existing.quantity+1 > stock) return alert('Only '+stock+' kg left');
+                if(existing) existing.quantity++;
+                else cart.push({productId:id,name,price,quantity:1,stock});
+                updateCartUI();
+                renderProducts();
+            });
+        });
+    }
+    function updateCartUI() {
+        document.getElementById('cartCount').innerText = cart.reduce((s,i)=>s+i.quantity,0);
+        document.getElementById('cartTotalAmount').innerText = cart.reduce((s,i)=>s+i.price*i.quantity,0).toFixed(2);
+        let html = cart.map((item,idx)=>`<div>${item.name} x${item.quantity} = ₹${(item.price*item.quantity).toFixed(2)} <button onclick="removeItem(${idx})">Remove</button></div>`).join('');
+        document.getElementById('cartItemsList').innerHTML = html || 'Empty';
+    }
+    window.removeItem = (idx) => { cart.splice(idx,1); updateCartUI(); renderProducts(); };
+    document.getElementById('cartIcon').onclick = () => cartSidebar.classList.add('open');
+    document.getElementById('closeCartBtn').onclick = () => cartSidebar.classList.remove('open');
+    document.getElementById('checkoutBtn').onclick = () => {
+        if(cart.length===0) return alert('Cart empty');
+        orderModal.classList.add('open');
+        document.getElementById('qrPaymentSection').style.display='none';
+        document.getElementById('checkoutFormSection').style.display='block';
+    };
+    document.getElementById('placeOrderBtn').onclick = async () => {
+        let name = document.getElementById('customerName').value;
+        let phone = document.getElementById('customerPhone').value;
+        let address = document.getElementById('customerAddress').value;
+        if(!name||!phone||!address) return alert('Fill all details');
+        let payload = { customerName:name, customerPhone:phone, customerAddress:address, items: cart.map(i=>({productId:i.productId, quantity:i.quantity, price:i.price})) };
+        let res = await fetch('/api/orders', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
+        let data = await res.json();
+        if(!res.ok) return alert(data.error);
+        document.getElementById('orderIdSpan').innerText = data.orderId;
+        document.getElementById('orderAmountSpan').innerText = data.totalAmount;
+        document.getElementById('qrCodeImg').src = data.qrCodeDataURL;
+        document.getElementById('qrPaymentSection').style.display = 'block';
+        document.getElementById('checkoutFormSection').style.display = 'none';
+        cart = []; updateCartUI(); renderProducts();
+    };
+    document.getElementById('closeModalBtn').onclick = () => orderModal.classList.remove('open');
+    loadProducts();
+</script>
+</body>
+</html>

@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head><title>Admin - Dad's Veggies</title><meta charset="UTF-8"></head>
+<body style="font-family:sans-serif; margin:2rem">
+<h1>🥬 Admin Dashboard</h1>
+<button onclick="logout()">Logout</button>
+<h2>📦 Products</h2>
+<div id="products"></div>
+<h2>📝 Orders</h2>
+<div id="orders"></div>
+<script>
+async function fetchAuth(url, opts={}) {
+  const res = await fetch(url, opts);
+  if(res.status===401) { alert("Session expired. Reload."); location.reload(); }
+  return res.json();
+}
+async function loadProducts() {
+  let data = await fetchAuth('/api/admin/products');
+  let html = '<table border=1><tr><th>ID</th><th>Name</th><th>Price</th><th>Stock</th><th>Action</th></tr>';
+  data.forEach(p => {
+    html += `<tr><td>${p.id}</td><td><input id="name${p.id}" value="${p.name}"></td>
+    <td><input id="price${p.id}" value="${p.price}"></td>
+    <td><input id="stock${p.id}" value="${p.stock}"></td>
+    <td><button onclick="updateProduct(${p.id})">Update</button> <button onclick="deleteProduct(${p.id})">Delete</button></td></tr>`;
+  });
+  html += `<tr><td colspan="5"><h3>Add New</h3><input id="newName" placeholder="Name"> <input id="newPrice" placeholder="Price"> <input id="newStock" placeholder="Stock"> <button onclick="addProduct()">Add</button></td></tr>`;
+  document.getElementById('products').innerHTML = html;
+}
+async function updateProduct(id) {
+  let name = document.getElementById(`name${id}`).value;
+  let price = document.getElementById(`price${id}`).value;
+  let stock = document.getElementById(`stock${id}`).value;
+  await fetch(`/api/admin/products/${id}`, {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,price,stock, description:"", category:"", image_url:""})});
+  loadProducts();
+}
+async function deleteProduct(id) {
+  if(confirm('Delete?')) await fetch(`/api/admin/products/${id}`, {method:'DELETE'});
+  loadProducts();
+}
+async function addProduct() {
+  let name = document.getElementById('newName').value;
+  let price = document.getElementById('newPrice').value;
+  let stock = document.getElementById('newStock').value;
+  await fetch('/api/admin/products', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,price,stock, description:"", category:"", image_url:""})});
+  loadProducts();
+}
+async function loadOrders() {
+  let orders = await fetchAuth('/api/admin/orders');
+  let html = '<table border=1><tr><th>ID</th><th>Customer</th><th>Total</th><th>Payment</th><th>Status</th><th>Actions</th></tr>';
+  orders.forEach(o => {
+    html += `<tr><td>${o.id}</td><td>${o.customer_name}<br>${o.customer_phone}<br>${o.customer_address}</td>
+    <td>₹${o.total_amount}</td><td>${o.payment_status}</td><td>${o.order_status}</td>
+    <td>${o.payment_status !== 'paid' ? `<button onclick="markPaid(${o.id})">✅ Confirm Payment</button>` : ''}
+    ${o.order_status !== 'delivered' ? `<button onclick="markDelivered(${o.id})">🚚 Mark Delivered</button>` : ''}</td></tr>`;
+  });
+  document.getElementById('orders').innerHTML = html;
+}
+async function markPaid(id) {
+  await fetch(`/api/admin/orders/${id}/pay`, {method:'PUT'});
+  loadOrders(); loadProducts();
+}
+async function markDelivered(id) {
+  await fetch(`/api/admin/orders/${id}/deliver`, {method:'PUT'});
+  loadOrders();
+}
+async function logout() {
+  await fetch('/admin/logout');
+  location.reload();
+}
+loadProducts(); loadOrders();
+setInterval(()=> loadOrders(), 10000);
+</script>
+</body>
+</html>
