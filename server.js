@@ -8,6 +8,8 @@ const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage() });
 const axios = require('axios');
 const FormData = require('form-data');
+const csv = require('csv-parser');
+const fs = require('fs');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -18,7 +20,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use(session({ secret: 'dadveggie123', resave: false, saveUninitialized: true, cookie: { secure: false } }));
 
 // ==================== GOOGLE SHEETS INTEGRATION ====================
-const GOOGLE_SHEETS_WEBHOOK = 'https://script.google.com/macros/s/AKfycbzeQ_XWvNtpcbcjIS3nMIQf6UJ9_uLSdzgF9U5y_wWnaIe3E9FCjEghUyPVWQP3IUDU/exec';
+const GOOGLE_SHEETS_WEBHOOK = process.env.GOOGLE_SHEETS_WEBHOOK || 'https://script.google.com/macros/s/AKfycbzeQ_XWvNtpcbcjIS3nMIQf6UJ9_uLSdzgF9U5y_wWnaIe3E9FCjEghUyPVWQP3IUDU/exec';
 
 async function addToGoogleSheets(customerData) {
     try {
@@ -33,7 +35,7 @@ async function addToGoogleSheets(customerData) {
 
 // ==================== WHATSAPP NOTIFICATION FUNCTIONS ====================
 async function sendWhatsAppMessage(phone, message) {
-    const apiKey = 'YOUR_CALLMEBOT_API_KEY';
+    const apiKey = process.env.CALLMEBOT_API_KEY || 'YOUR_CALLMEBOT_API_KEY';
     const url = `https://api.callmebot.com/whatsapp.php?phone=${phone}&text=${encodeURIComponent(message)}&apikey=${apiKey}`;
     try {
         await axios.get(url);
@@ -46,10 +48,14 @@ async function sendWhatsAppMessage(phone, message) {
 }
 
 // ==================== TELEGRAM NOTIFICATION ====================
-const TELEGRAM_BOT_TOKEN = '8790686895:AAHc_g8wqH6nHajgt2RSuTaDXcPRRdjoX84';
-const TELEGRAM_CHAT_ID = '853947915';
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '853947915';
 
 async function sendTelegramAlert(message) {
+    if (!TELEGRAM_BOT_TOKEN) {
+        console.log('⚠️ Telegram bot token not configured. Skipping notification.');
+        return;
+    }
     try {
         const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
         await axios.post(url, {
@@ -63,6 +69,61 @@ async function sendTelegramAlert(message) {
     }
 }
 
+// ==================== AUTOMATIC IMAGE SEARCH ====================
+const UNSPLASH_ACCESS_KEY = process.env.UNSPLASH_ACCESS_KEY || '';
+const PIXABAY_API_KEY = process.env.PIXABAY_API_KEY || '';
+
+app.get('/api/search-image/:query', async (req, res) => {
+    const query = req.params.query;
+    try {
+        let imageUrl = null;
+        let photographer = null;
+        let photographerUrl = null;
+        let source = null;
+        
+        // Try Pixabay first (more generous free tier)
+        if (PIXABAY_API_KEY && PIXABAY_API_KEY !== 'YOUR_PIXABAY_KEY') {
+            const pixabayRes = await axios.get(`https://pixabay.com/api/?key=${PIXABAY_API_KEY}&q=${encodeURIComponent(query)}&image_type=photo&per_page=3`);
+            
+            if (pixabayRes.data.hits && pixabayRes.data.hits.length > 0) {
+                imageUrl = pixabayRes.data.hits[0].webformatURL;
+                photographer = pixabayRes.data.hits[0].user;
+                photographerUrl = `https://pixabay.com/users/${photographer}/`;
+                source = 'Pixabay';
+            }
+        }
+        
+        // Try Unsplash as fallback
+        if (!imageUrl && UNSPLASH_ACCESS_KEY && UNSPLASH_ACCESS_KEY !== 'YOUR_UNSPLASH_KEY') {
+            const unsplashRes = await axios.get(`https://api.unsplash.com/search/photos?query=${encodeURIComponent(query)}&per_page=1`, {
+                headers: { 'Authorization': `Client-ID ${UNSPLASH_ACCESS_KEY}` }
+            });
+            
+            if (unsplashRes.data.results && unsplashRes.data.results.length > 0) {
+                imageUrl = unsplashRes.data.results[0].urls.regular;
+                photographer = unsplashRes.data.results[0].user.name;
+                photographerUrl = unsplashRes.data.results[0].user.links.html;
+                source = 'Unsplash';
+            }
+        }
+        
+        if (imageUrl) {
+            res.json({ 
+                success: true, 
+                imageUrl: imageUrl,
+                photographer: photographer,
+                photographerUrl: photographerUrl,
+                source: source
+            });
+        } else {
+            res.json({ success: false, message: 'No image found' });
+        }
+    } catch (error) {
+        console.error('Image search error:', error.message);
+        res.json({ success: false, message: 'API error' });
+    }
+});
+
 // ==================== IMAGE UPLOAD ====================
 app.post('/api/upload-image', upload.single('image'), async (req, res) => {
     try {
@@ -73,7 +134,7 @@ app.post('/api/upload-image', upload.single('image'), async (req, res) => {
         const response = await axios.post('https://api.imgur.com/3/image', formData, {
             headers: {
                 ...formData.getHeaders(),
-                'Authorization': 'Client-ID YOUR_IMGUR_CLIENT_ID'
+                'Authorization': `Client-ID ${process.env.IMGUR_CLIENT_ID || 'YOUR_IMGUR_CLIENT_ID'}`
             }
         });
         
@@ -142,6 +203,113 @@ function isAdmin(req, res, next) {
     if (req.session && req.session.admin) return next();
     else return res.status(401).json({ error: 'Unauthorized' });
 }
+
+// ==================== BULK PRODUCT UPLOAD ====================
+// Download CSV Template
+app.get('/api/admin/products/template', isAdmin, (req, res) => {
+    const templateHeaders = ['name', 'price', 'stock', 'unit', 'weight_options', 'category', 'image_url', 'description'];
+    
+    let csvContent = templateHeaders.join(',') + '\n';
+    csvContent += 'Tomato,40,100,kg,"250g,500g,1kg",Vegetables,https://cdn.pixabay.com/photo/2020/06/01/13/55/tomatoes-5247827_640.jpg,Fresh red tomatoes\n';
+    csvContent += 'Potato,30,100,kg,"250g,500g,1kg",Vegetables,https://cdn.pixabay.com/photo/2016/08/11/08/04/potatoes-1585075_640.jpg,Farm potatoes\n';
+    csvContent += 'Spinach,25,100,bunch,"1,2,3,4,5",Vegetables,https://cdn.pixabay.com/photo/2016/03/26/16/44/spinach-1280831_640.jpg,Fresh spinach bunch\n';
+    
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="product_template.csv"');
+    res.send(csvContent);
+});
+
+// Bulk Upload Products via CSV
+const csvUpload = multer({ dest: 'uploads/' });
+app.post('/api/admin/products/bulk', isAdmin, csvUpload.single('csvFile'), async (req, res) => {
+    try {
+        if (!req.file) return res.status(400).json({ error: 'No CSV file uploaded' });
+        
+        if (!req.file.originalname.toLowerCase().endsWith('.csv')) {
+            fs.unlinkSync(req.file.path);
+            return res.status(400).json({ error: 'Only CSV files are allowed' });
+        }
+        
+        const results = [];
+        const errors = [];
+        let rowNumber = 1;
+        
+        await new Promise((resolve, reject) => {
+            fs.createReadStream(req.file.path)
+                .pipe(csv())
+                .on('data', (data) => {
+                    rowNumber++;
+                    results.push(data);
+                })
+                .on('end', resolve)
+                .on('error', reject);
+        });
+        
+        const insertedProducts = [];
+        for (let i = 0; i < results.length; i++) {
+            const row = results[i];
+            const rowNum = i + 2;
+            
+            if (!row.name || !row.price || !row.stock) {
+                errors.push(`Row ${rowNum}: Missing required fields (name, price, stock)`);
+                continue;
+            }
+            
+            if (isNaN(parseFloat(row.price))) {
+                errors.push(`Row ${rowNum}: Price must be a number`);
+                continue;
+            }
+            
+            if (isNaN(parseInt(row.stock))) {
+                errors.push(`Row ${rowNum}: Stock must be a number`);
+                continue;
+            }
+            
+            const validUnits = ['kg', 'piece', 'bunch', 'packet'];
+            const unit = row.unit || 'kg';
+            if (!validUnits.includes(unit)) {
+                errors.push(`Row ${rowNum}: Unit must be one of: ${validUnits.join(', ')}`);
+                continue;
+            }
+            
+            const insert = db.prepare(`INSERT INTO products (name, description, price, stock, image_url, category, unit, weight_options) VALUES (?,?,?,?,?,?,?,?)`);
+            const result = insert.run(
+                row.name.trim(),
+                row.description || '',
+                parseFloat(row.price),
+                parseInt(row.stock),
+                row.image_url || '',
+                row.category || 'Vegetables',
+                unit,
+                row.weight_options || '1kg,500g,250g'
+            );
+            
+            insertedProducts.push({ id: result.lastInsertRowid, name: row.name });
+        }
+        
+        fs.unlinkSync(req.file.path);
+        
+        if (errors.length > 0) {
+            res.status(207).json({
+                success: true,
+                partial: true,
+                message: `${insertedProducts.length} products added, ${errors.length} errors`,
+                inserted: insertedProducts,
+                errors: errors
+            });
+        } else {
+            res.json({
+                success: true,
+                message: `${insertedProducts.length} products added successfully`,
+                inserted: insertedProducts
+            });
+        }
+    } catch (error) {
+        console.error('Bulk upload error:', error);
+        if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        res.status(500).json({ error: 'Bulk upload failed: ' + error.message });
+    }
+});
 
 // ==================== CUSTOMER API ENDPOINTS ====================
 app.get('/api/products', (req, res) => {
@@ -213,14 +381,14 @@ app.get('/api/admin/products', isAdmin, (req, res) => {
 app.post('/api/admin/products', isAdmin, (req, res) => {
     const { name, description, price, stock, image_url, category, unit, weight_options } = req.body;
     const insert = db.prepare(`INSERT INTO products (name, description, price, stock, image_url, category, unit, weight_options) VALUES (?,?,?,?,?,?,?,?)`);
-    const result = insert.run(name, description, price, stock, image_url || '', category, unit || 'kg', weight_options || '1kg');
+    const result = insert.run(name, description, price, stock, image_url || '', category, unit || 'kg', weight_options || '1kg,500g,250g');
     res.json({ id: result.lastInsertRowid });
 });
 
 app.put('/api/admin/products/:id', isAdmin, (req, res) => {
     const { name, description, price, stock, image_url, category, unit, weight_options } = req.body;
     const update = db.prepare(`UPDATE products SET name=?, description=?, price=?, stock=?, image_url=?, category=?, unit=?, weight_options=? WHERE id=?`);
-    update.run(name, description, price, stock, image_url, category, unit || 'kg', weight_options || '1kg', req.params.id);
+    update.run(name, description, price, stock, image_url, category, unit || 'kg', weight_options || '1kg,500g,250g', req.params.id);
     res.json({ updated: true });
 });
 
@@ -263,7 +431,7 @@ app.put('/api/admin/orders/:id/dispatch', isAdmin, async (req, res) => {
     const order = db.prepare(`SELECT customer_name, customer_phone, total_amount FROM orders WHERE id = ?`).get(req.params.id);
     db.prepare(`UPDATE orders SET order_status = 'dispatched' WHERE id = ?`).run(req.params.id);
     
-    await sendWhatsAppMessage(order.customer_phone, `🚚 Order #${req.params.id} DISPATCHED!\nTotal: ₹${order.total_amount}\nYour order is on the way! - Dad's Veggie Shop`);
+    await sendWhatsAppMessage(order.customer_phone, `🚚 Order #${req.params.id} DISPATCHED!\nYour order is on the way! - Dad's Veggie Shop`);
     await sendTelegramAlert(`🚚 <b>ORDER DISPATCHED</b>\nOrder #${req.params.id}\nCustomer: ${order.customer_name}\nAmount: ₹${order.total_amount}`);
     
     res.json({ success: true, customerPhone: order.customer_phone, totalAmount: order.total_amount });
@@ -273,7 +441,7 @@ app.put('/api/admin/orders/:id/deliver', isAdmin, async (req, res) => {
     const order = db.prepare(`SELECT customer_name, customer_phone, total_amount FROM orders WHERE id = ?`).get(req.params.id);
     db.prepare(`UPDATE orders SET order_status = 'delivered' WHERE id = ?`).run(req.params.id);
     
-    await sendWhatsAppMessage(order.customer_phone, `🎉 Order #${req.params.id} DELIVERED!\nTotal: ₹${order.total_amount}\nThank you for shopping with Dad's Veggie Shop! 🥬`);
+    await sendWhatsAppMessage(order.customer_phone, `🎉 Order #${req.params.id} DELIVERED!\nThank you for shopping with Dad's Veggie Shop! 🥬`);
     await sendTelegramAlert(`🎉 <b>ORDER DELIVERED</b>\nOrder #${req.params.id}\nCustomer: ${order.customer_name}\nAmount: ₹${order.total_amount}`);
     
     res.json({ success: true, customerPhone: order.customer_phone, totalAmount: order.total_amount });
@@ -295,5 +463,4 @@ app.get('/admin-page', (req, res) => {
 app.listen(PORT, HOST, () => {
     console.log(`✅ Veggie Shop running on http://${HOST}:${PORT}`);
     console.log(`👉 Admin panel: http://${HOST}:${PORT}/admin-page (password: Pass@6073)`);
-    console.log(`🤖 Telegram bot @VegFresh_bot is ready for notifications`);
 });
