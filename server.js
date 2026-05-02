@@ -30,6 +30,7 @@ async function addToGoogleSheets(customerData) {
         console.log('Google Sheets save failed:', e.message);
     }
 }
+
 // ==================== WHATSAPP NOTIFICATION FUNCTIONS ====================
 
 async function sendWhatsAppMessage(phone, message) {
@@ -46,6 +47,24 @@ async function sendWhatsAppMessage(phone, message) {
     } catch(e) { 
         console.log('WhatsApp failed:', e.message);
         return false;
+    }
+}
+
+// ==================== TELEGRAM NOTIFICATION ====================
+// Bot: @VegFresh_bot | Token obtained from @BotFather
+
+
+async function sendTelegramAlert(message) {
+    try {
+        const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+        await axios.post(url, {
+            chat_id: TELEGRAM_CHAT_ID,
+            text: message,
+            parse_mode: 'HTML'
+        });
+        console.log('✅ Telegram alert sent');
+    } catch (e) {
+        console.log('Telegram alert failed:', e.message);
     }
 }
 
@@ -101,6 +120,7 @@ db.exec(`
         product_id INTEGER,
         quantity INTEGER,
         price REAL,
+        weight TEXT,
         FOREIGN KEY(order_id) REFERENCES orders(id),
         FOREIGN KEY(product_id) REFERENCES products(id)
     );
@@ -110,17 +130,18 @@ db.exec(`
 try { db.exec(`ALTER TABLE products ADD COLUMN unit TEXT DEFAULT 'kg';`); } catch (e) {}
 try { db.exec(`ALTER TABLE products ADD COLUMN weight_options TEXT DEFAULT '1kg';`); } catch (e) {}
 try { db.exec(`ALTER TABLE orders ADD COLUMN delivery_slot TEXT;`); } catch (e) {}
+try { db.exec(`ALTER TABLE order_items ADD COLUMN weight TEXT;`); } catch (e) {}
 
 // Insert sample vegetables if none exist
 const row = db.prepare('SELECT COUNT(*) as count FROM products').get();
 if (row.count === 0) {
     const veggies = [
-        ['Tomato', 'Fresh red tomatoes', 40, 50, 'https://cdn.pixabay.com/photo/2020/06/01/13/55/tomatoes-5247827_640.jpg', 'Vegetables', 'kg', '1kg,500g,250g'],
-        ['Potato', 'Farm potatoes', 30, 100, 'https://cdn.pixabay.com/photo/2016/08/11/08/04/potatoes-1585075_640.jpg', 'Vegetables', 'kg', '1kg,500g,250g'],
-        ['Onion', 'Red onion', 35, 80, 'https://cdn.pixabay.com/photo/2020/07/15/20/38/onion-5409359_640.jpg', 'Vegetables', 'kg', '1kg,500g,250g'],
-        ['Carrot', 'Organic carrots', 45, 60, 'https://cdn.pixabay.com/photo/2017/06/23/06/04/carrots-2433439_640.jpg', 'Vegetables', 'kg', '1kg,500g,250g'],
-        ['Spinach', 'Fresh spinach bunch', 25, 30, 'https://cdn.pixabay.com/photo/2016/03/26/16/44/spinach-1280831_640.jpg', 'Vegetables', 'bunch', '1bunch,2bunch'],
-        ['Cucumber', 'Crisp cucumber', 35, 45, 'https://cdn.pixabay.com/photo/2016/07/24/17/33/cucumber-1538652_640.jpg', 'Vegetables', 'piece', '1pc,2pc,3pc']
+        ['Tomato', 'Fresh red tomatoes', 40, 100, 'https://cdn.pixabay.com/photo/2020/06/01/13/55/tomatoes-5247827_640.jpg', 'Vegetables', 'kg', '250g,500g,1kg'],
+        ['Potato', 'Farm potatoes', 30, 100, 'https://cdn.pixabay.com/photo/2016/08/11/08/04/potatoes-1585075_640.jpg', 'Vegetables', 'kg', '250g,500g,1kg'],
+        ['Onion', 'Red onion', 35, 100, 'https://cdn.pixabay.com/photo/2020/07/15/20/38/onion-5409359_640.jpg', 'Vegetables', 'kg', '250g,500g,1kg'],
+        ['Carrot', 'Organic carrots', 45, 100, 'https://cdn.pixabay.com/photo/2017/06/23/06/04/carrots-2433439_640.jpg', 'Vegetables', 'kg', '250g,500g,1kg'],
+        ['Spinach', 'Fresh spinach bunch', 25, 100, 'https://cdn.pixabay.com/photo/2016/03/26/16/44/spinach-1280831_640.jpg', 'Vegetables', 'bunch', '1,2,3,4,5,6,7,8,9,10,11,12,13,14,15'],
+        ['Cucumber', 'Crisp cucumber', 35, 100, 'https://cdn.pixabay.com/photo/2016/07/24/17/33/cucumber-1538652_640.jpg', 'Vegetables', 'piece', '1,2,3,4,5,6,7,8,9,10,11,12,13,14,15']
     ];
     const insert = db.prepare(`INSERT INTO products (name, description, price, stock, image_url, category, unit, weight_options) VALUES (?,?,?,?,?,?,?,?)`);
     for (const v of veggies) insert.run(v);
@@ -134,7 +155,7 @@ function isAdmin(req, res, next) {
 // ==================== CUSTOMER API ENDPOINTS ====================
 
 app.get('/api/products', (req, res) => {
-    const rows = db.prepare(`SELECT id, name, price, stock, image_url, category, unit, weight_options FROM products`).all();
+    const rows = db.prepare(`SELECT id, name, price, image_url, category, unit, weight_options FROM products`).all();
     res.json({ products: rows });
 });
 
@@ -155,9 +176,9 @@ app.post('/api/orders', async (req, res) => {
     const result = insertOrder.run(customerName, customerPhone, customerAddress, total, deliverySlot || null);
     const orderId = result.lastInsertRowid;
     
-    const insertItem = db.prepare(`INSERT INTO order_items (order_id, product_id, quantity, price) VALUES (?,?,?,?)`);
+    const insertItem = db.prepare(`INSERT INTO order_items (order_id, product_id, quantity, price, weight) VALUES (?,?,?,?,?)`);
     for (let it of items) {
-        insertItem.run(orderId, it.productId, it.quantity, it.price);
+        insertItem.run(orderId, it.productId, it.quantity, it.price, it.weight || null);
     }
     
     // Save customer to Google Sheets
@@ -175,6 +196,10 @@ app.post('/api/orders', async (req, res) => {
     const adminPhone = "919029186608";
     const orderMessage = `🆕 New Order #${orderId}\nCustomer: ${customerName}\nPhone: ${customerPhone}\nTotal: ₹${total}\nSlot: ${deliverySlot || 'Not selected'}`;
     await sendWhatsAppMessage(adminPhone, orderMessage);
+    
+    // Send Telegram alert for new order
+    const telegramMessage = `🆕 <b>NEW ORDER #${orderId}</b>\n\nCustomer: ${customerName}\nPhone: ${customerPhone}\nTotal: ₹${total}\nSlot: ${deliverySlot || 'Not selected'}\n\n🔗 Admin Panel: ${req.protocol}://${req.get('host')}/admin-page`;
+    await sendTelegramAlert(telegramMessage);
     
     const UPI_ID = "9029186608@okbizaxis";
     const upiUrl = `upi://pay?pa=${UPI_ID}&pn=Dad%20Veg%20Shop&am=${total}&cu=INR&tn=Order%20${orderId}`;
@@ -232,7 +257,7 @@ app.delete('/api/admin/products/:id', isAdmin, (req, res) => {
 app.get('/api/admin/orders', isAdmin, (req, res) => {
     const orders = db.prepare(`SELECT * FROM orders ORDER BY id DESC`).all();
     for (let order of orders) {
-        const items = db.prepare(`SELECT product_id, quantity, price FROM order_items WHERE order_id = ?`).all(order.id);
+        const items = db.prepare(`SELECT product_id, quantity, price, weight FROM order_items WHERE order_id = ?`).all(order.id);
         order.items = items;
     }
     res.json(orders);
@@ -258,6 +283,9 @@ app.put('/api/admin/orders/:id/pay', isAdmin, async (req, res) => {
     // Send WhatsApp - Order Confirmed to customer
     await sendWhatsAppMessage(order.customer_phone, `✅ Order #${orderId} CONFIRMED!\nAmount: ₹${order.total_amount}\nYour order will be prepared and dispatched soon. - Dad's Veggie Shop`);
     
+    // Send Telegram alert for payment confirmation
+    await sendTelegramAlert(`✅ <b>PAYMENT CONFIRMED</b>\nOrder #${orderId}\nCustomer: ${order.customer_name}\nAmount: ₹${order.total_amount}`);
+    
     res.json({ success: true });
 });
 
@@ -268,6 +296,9 @@ app.put('/api/admin/orders/:id/dispatch', isAdmin, async (req, res) => {
     
     await sendWhatsAppMessage(order.customer_phone, `🚚 Order #${req.params.id} DISPATCHED!\nTotal: ₹${order.total_amount}\nYour order is on the way! - Dad's Veggie Shop`);
     
+    // Send Telegram alert for dispatch
+    await sendTelegramAlert(`🚚 <b>ORDER DISPATCHED</b>\nOrder #${req.params.id}\nCustomer: ${order.customer_name}\nAmount: ₹${order.total_amount}`);
+    
     res.json({ success: true });
 });
 
@@ -277,6 +308,9 @@ app.put('/api/admin/orders/:id/deliver', isAdmin, async (req, res) => {
     db.prepare(`UPDATE orders SET order_status = 'delivered' WHERE id = ?`).run(req.params.id);
     
     await sendWhatsAppMessage(order.customer_phone, `🎉 Order #${req.params.id} DELIVERED!\nTotal: ₹${order.total_amount}\nThank you for shopping with Dad's Veggie Shop! 🥬`);
+    
+    // Send Telegram alert for delivery
+    await sendTelegramAlert(`🎉 <b>ORDER DELIVERED</b>\nOrder #${req.params.id}\nCustomer: ${order.customer_name}\nAmount: ₹${order.total_amount}`);
     
     res.json({ success: true });
 });
@@ -298,4 +332,5 @@ app.get('/admin-page', (req, res) => {
 app.listen(PORT, HOST, () => {
     console.log(`✅ Veggie Shop running on http://${HOST}:${PORT}`);
     console.log(`👉 Admin panel: http://${HOST}:${PORT}/admin-page (password: Pass@6073)`);
+    console.log(`🤖 Telegram bot @VegFresh_bot is ready for notifications`);
 });
