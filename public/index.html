@@ -14,13 +14,13 @@
         .category-filters { margin: 20px 0; text-align: center; display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
         .category-filters button { background: #e0e0e0; border: none; padding: 8px 16px; border-radius: 30px; cursor: pointer; font-weight: bold; }
         .category-filters button:hover { background: #c8e6c9; }
-        .products-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1.8rem; margin-top: 1rem; }
+        .products-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1.8rem; margin-top: 1rem; }
         .product-card { background: white; border-radius: 24px; padding: 1rem; text-align: center; box-shadow: 0 8px 20px rgba(0,0,0,0.05); position: relative; }
         .product-img { width: 100%; height: 150px; object-fit: cover; border-radius: 18px; background: #eef2e6; }
         .product-name { font-size: 1.4rem; font-weight: 700; margin: 0.7rem 0 0.3rem; }
         .product-price { font-size: 1.3rem; color: #2e7d32; font-weight: bold; }
         .product-category { font-size: 12px; color: #666; background: #f0f0f0; padding: 2px 8px; border-radius: 20px; display: inline-block; margin: 5px 0; }
-        .add-btn { background: #2e7d32; color: white; border: none; padding: 0.6rem 1.2rem; border-radius: 40px; cursor: pointer; width: 100%; }
+        .add-btn { background: #2e7d32; color: white; border: none; padding: 0.6rem 1.2rem; border-radius: 40px; cursor: pointer; width: 100%; margin-top: 8px; }
         .add-btn:disabled { background: #aaa; cursor: not-allowed; }
         .add-btn.in-cart { background: #ff9800; }
         .cart-sidebar { position: fixed; top: 0; right: -400px; width: 380px; height: 100%; background: white; z-index: 1000; transition: 0.3s; padding: 1.5rem; overflow-y: auto; box-shadow: -5px 0 20px rgba(0,0,0,0.2); }
@@ -42,7 +42,7 @@
         .status-dispatched { background: #d4edda; color: #155724; }
         .status-delivered { background: #d1ecf1; color: #0c5460; }
         .added-to-cart-badge { position: absolute; top: 10px; right: 10px; background: #ff9800; color: white; padding: 4px 8px; border-radius: 20px; font-size: 10px; font-weight: bold; }
-        .quantity-select { width: 80px; padding: 5px; margin: 5px; border-radius: 20px; border: 1px solid #ccc; display: inline-block; }
+        .weight-select { width: 100%; padding: 8px; margin: 8px 0; border-radius: 20px; border: 1px solid #ccc; background: white; cursor: pointer; }
         @media (max-width: 700px) { .cart-sidebar { width: 100%; right: -100%; } .order-tracking input { width: 100%; margin-bottom: 10px; } }
         input, textarea, select { width: 100%; padding: 0.5rem; margin: 0.5rem 0; border-radius: 20px; border: 1px solid #ccc; }
         button { border: none; background: none; cursor: pointer; }
@@ -64,7 +64,7 @@
         🍽️ <strong>We take bulk orders for Caterers/Restaurants</strong> — Contact us for wholesale pricing!
     </div>
     
-    <!-- Order Tracking Section - Phone Only -->
+    <!-- Order Tracking Section -->
     <div class="order-tracking">
         <h3>🔍 Track Your Orders</h3>
         <input type="tel" id="trackPhone" placeholder="Enter 10-digit Mobile Number" maxlength="10" pattern="[0-9]{10}" style="width:250px;">
@@ -120,7 +120,6 @@
 </div>
 <footer>🧾 Fresh vegetables delivered | UPI QR payment | Dad's Shop since 1995</footer>
 
-<!-- WhatsApp Floating Button -->
 <a href="https://wa.me/919029186608?text=Hi%2C%20I%20want%20to%20place%20an%20order" class="whatsapp-float" target="_blank">💬 WhatsApp us</a>
 
 <script>
@@ -128,40 +127,47 @@
     let cart = [];
     let currentFilter = 'all';
     let currentUpiIntentUrl = '';
-    let historyStack = [];
+    let backPressCount = 0;
+    let backPressTimer = null;
 
     const productsContainer = document.getElementById('productsContainer');
     const cartSidebar = document.getElementById('cartSidebar');
     const orderModal = document.getElementById('orderModal');
 
-    // Track navigation history for double back exit
-    function pushHistory() {
-        historyStack.push(window.location.href);
-        if (historyStack.length > 2) historyStack.shift();
-    }
-    pushHistory();
-
-    // Double back exit
+    // Double back exit with confirmation
     window.addEventListener('popstate', function() {
         if (cartSidebar.classList.contains('open')) {
             cartSidebar.classList.remove('open');
-            pushHistory();
+            history.pushState(null, null, window.location.href);
         } else if (orderModal.classList.contains('open')) {
             orderModal.classList.remove('open');
-            pushHistory();
+            history.pushState(null, null, window.location.href);
         } else {
-            if (historyStack.length === 1) {
+            if (backPressCount === 0) {
+                backPressCount++;
                 alert('Press back again to exit');
-                pushHistory();
+                
+                backPressTimer = setTimeout(() => {
+                    backPressCount = 0;
+                }, 2000);
+                
+                history.pushState(null, null, window.location.href);
             } else {
+                window.close();
                 history.back();
             }
         }
     });
+    history.pushState(null, null, window.location.href);
 
     // Helper: delivery charge calculation
     function calculateDelivery(totalAmount) {
         return totalAmount >= 100 ? 0 : 30;
+    }
+
+    // Validate 10-digit phone
+    function validatePhone(phone) {
+        return /^\d{10}$/.test(phone);
     }
 
     // Update cart UI
@@ -176,7 +182,7 @@
         
         let html = cart.map((item, idx) => `
             <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
-                ${item.name} (${item.weight || item.unit}) x${item.quantity} = ₹${(item.price * item.quantity).toFixed(2)}
+                ${item.name} (${item.weight}) x${item.quantity} = ₹${(item.price * item.quantity).toFixed(2)}
                 <button onclick="removeItem(${idx})" style="background:#e53935; color:white; border-radius:30px; padding:2px 10px;">Remove</button>
             </div>
         `).join('');
@@ -201,7 +207,7 @@
         return item ? item.quantity : 0;
     }
 
-    // Render products without stock display
+    // Render products with weight options - NO DEFAULT SELECTION
     function renderProducts(productsToRender) {
         if (!productsToRender.length) {
             productsContainer.innerHTML = '<p>No vegetables available currently. Check back later!</p>';
@@ -212,20 +218,22 @@
             const unitDisplay = p.unit || 'kg';
             const inCart = inCartQty > 0;
             
-            // Generate weight options dropdown based on unit
             let weightHtml = '';
             if (unitDisplay === 'kg') {
-                weightHtml = `<select class="weight-select" data-id="${p.id}">
-                    <option value="250g">250g</option>
-                    <option value="500g">500g</option>
-                    <option value="1kg" selected>1kg</option>
+                weightHtml = `<select class="weight-select" data-id="${p.id}" data-price="${p.price}" data-unit="kg">
+                    <option value="" disabled selected>-- Select Weight --</option>
+                    <option value="250g">250g - ₹${(p.price * 0.25).toFixed(2)}</option>
+                    <option value="500g">500g - ₹${(p.price * 0.5).toFixed(2)}</option>
+                    <option value="1kg">1kg - ₹${p.price}</option>
                 </select>`;
             } else if (unitDisplay === 'piece' || unitDisplay === 'bunch' || unitDisplay === 'packet') {
-                weightHtml = `<select class="weight-select" data-id="${p.id}">
-                    ${[...Array(15)].map((_, i) => `<option value="${i+1}${unitDisplay === 'piece' ? 'pc' : unitDisplay === 'bunch' ? 'bunch' : 'packet'}">${i+1} ${unitDisplay}${i > 0 ? 's' : ''}</option>`).join('')}
+                let options = '<option value="" disabled selected>-- Select Quantity --</option>';
+                for (let i = 1; i <= 15; i++) {
+                    options += `<option value="${i}">${i} ${unitDisplay}${i > 1 ? 's' : ''} - ₹${(p.price * i).toFixed(2)}</option>`;
+                }
+                weightHtml = `<select class="weight-select" data-id="${p.id}" data-price="${p.price}" data-unit="${unitDisplay}">
+                    ${options}
                 </select>`;
-            } else {
-                weightHtml = `<input type="number" class="weight-select" data-id="${p.id}" placeholder="Quantity" min="0.25" step="0.25" value="1">`;
             }
             
             return `
@@ -236,7 +244,7 @@
                     <div class="product-price">₹${p.price}/${unitDisplay}</div>
                     <div class="product-category">${p.category || 'Vegetables'}</div>
                     ${weightHtml}
-                    <button class="add-btn ${inCart ? 'in-cart' : ''}" data-id="${p.id}" data-name="${p.name}" data-price="${p.price}" data-unit="${unitDisplay}">
+                    <button class="add-btn ${inCart ? 'in-cart' : ''}" data-id="${p.id}" data-name="${p.name}" data-base-price="${p.price}" data-unit="${unitDisplay}">
                         ${inCart ? `✓ Added (${inCartQty})` : 'Add to Cart'}
                     </button>
                 </div>
@@ -248,21 +256,24 @@
             btn.addEventListener('click', () => {
                 let id = parseInt(btn.dataset.id);
                 let name = btn.dataset.name;
-                let basePrice = parseFloat(btn.dataset.price);
+                let basePrice = parseFloat(btn.dataset.basePrice);
                 let unit = btn.dataset.unit;
                 let weightSelect = document.querySelector(`.weight-select[data-id="${id}"]`);
-                let selectedWeight = weightSelect ? weightSelect.value : '1kg';
+                let selectedWeight = weightSelect ? weightSelect.value : null;
                 
-                // Calculate price based on weight
+                if (!selectedWeight || selectedWeight === '') {
+                    alert('Please select weight/quantity first');
+                    return;
+                }
+                
                 let price = basePrice;
-                if (selectedWeight === '250g') price = basePrice * 0.25;
-                else if (selectedWeight === '500g') price = basePrice * 0.5;
-                else if (selectedWeight.includes('pc') || selectedWeight.includes('bunch') || selectedWeight.includes('packet')) {
+                if (unit === 'kg') {
+                    if (selectedWeight === '250g') price = basePrice * 0.25;
+                    else if (selectedWeight === '500g') price = basePrice * 0.5;
+                    else price = basePrice;
+                } else {
                     let qty = parseInt(selectedWeight);
                     price = basePrice * qty;
-                } else if (selectedWeight.includes('kg')) {
-                    let kg = parseFloat(selectedWeight);
-                    price = basePrice * kg;
                 }
                 
                 let existing = cart.find(i => i.productId === id && i.weight === selectedWeight);
@@ -285,20 +296,14 @@
     }
     window.filterProducts = filterProducts;
 
-    document.getElementById('cartIcon').onclick = () => { cartSidebar.classList.add('open'); pushHistory(); };
+    document.getElementById('cartIcon').onclick = () => cartSidebar.classList.add('open');
     document.getElementById('closeCartBtn').onclick = () => cartSidebar.classList.remove('open');
     document.getElementById('checkoutBtn').onclick = () => {
         if(cart.length===0) return alert('Cart empty');
         orderModal.classList.add('open');
         document.getElementById('qrPaymentSection').style.display='none';
         document.getElementById('checkoutFormSection').style.display='block';
-        pushHistory();
     };
-
-    // Validate 10-digit phone
-    function validatePhone(phone) {
-        return /^\d{10}$/.test(phone);
-    }
 
     // Place order
     document.getElementById('placeOrderBtn').onclick = async () => {

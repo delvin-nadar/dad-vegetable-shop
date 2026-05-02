@@ -10,10 +10,10 @@
         table { border-collapse: collapse; width: 100%; margin-bottom: 2rem; }
         th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
         button { cursor: pointer; }
-        .status-pending { background: #fff3cd; color: #856404; padding: 4px 8px; border-radius: 20px; font-size: 12px; }
-        .status-confirmed { background: #cce5ff; color: #004085; padding: 4px 8px; border-radius: 20px; font-size: 12px; }
-        .status-dispatched { background: #d4edda; color: #155724; padding: 4px 8px; border-radius: 20px; font-size: 12px; }
-        .status-delivered { background: #d1ecf1; color: #0c5460; padding: 4px 8px; border-radius: 20px; font-size: 12px; }
+        .status-pending { background: #fff3cd; color: #856404; padding: 4px 8px; border-radius: 20px; font-size: 12px; display: inline-block; }
+        .status-confirmed { background: #cce5ff; color: #004085; padding: 4px 8px; border-radius: 20px; font-size: 12px; display: inline-block; }
+        .status-dispatched { background: #d4edda; color: #155724; padding: 4px 8px; border-radius: 20px; font-size: 12px; display: inline-block; }
+        .status-delivered { background: #d1ecf1; color: #0c5460; padding: 4px 8px; border-radius: 20px; font-size: 12px; display: inline-block; }
     </style>
 </head>
 <body>
@@ -26,7 +26,6 @@
 <h2>📝 Orders</h2>
 <div id="orders"></div>
 
-<!-- Enhanced Add Product Section with Unit and Weight Options -->
 <div class="product-form">
     <h3>➕ Add New Product</h3>
     <input type="text" id="newName" placeholder="Product Name">
@@ -38,54 +37,36 @@
         <option value="bunch">Bunch</option>
         <option value="packet">Packet</option>
     </select>
-    <!-- Weight Options Field -->
     <div class="weight-options">
         <label>Weight Options (comma separated):</label>
-        <input type="text" id="newWeightOptions" placeholder="e.g., 1kg,500g,250g" value="1kg,500g,250g">
-        <small>Available weight options for this product</small>
+        <input type="text" id="newWeightOptions" placeholder="e.g., 250g,500g,1kg or 1,2,3" value="1kg,500g,250g">
     </div>
     <select id="newCategory">
         <option value="Vegetables">🥬 Fresh Produce</option>
-        <option value="Masala Powders">🌶️ Masala Powders (Spices & Blends)</option>
-        <option value="South Indian">🍛 South Indian (Ready-to-Make / Snacks)</option>
-        <option value="Dry Groceries">🍚 Dry Groceries (Lentils & Rice)</option>
+        <option value="Masala Powders">🌶️ Masala Powders</option>
+        <option value="South Indian">🍛 South Indian</option>
+        <option value="Dry Groceries">🍚 Dry Groceries</option>
     </select>
-    <input type="text" id="newImageUrl" placeholder="Image URL (or upload below)" style="width: 300px;">
+    <input type="text" id="newImageUrl" placeholder="Image URL" style="width: 300px;">
     <input type="file" id="imageUpload" accept="image/*">
-    <button onclick="uploadImage()">📤 Upload to Imgur</button>
+    <button onclick="uploadImage()">📤 Upload Image</button>
     <button onclick="addProduct()">➕ Add Product</button>
 </div>
 
 <script>
-// ---------- Helper for authenticated fetch ----------
 async function fetchAuth(url, opts={}) {
     const res = await fetch(url, opts);
-    if (res.status === 401) {
-        alert("Session expired. Please login again.");
-        location.reload();
-    }
+    if (res.status === 401) { alert("Session expired. Please login again."); location.reload(); }
     return res.json();
 }
 
-// ---------- Load and display products with Unit and Weight Options columns ----------
+let ordersData = [];
+
 async function loadProducts() {
     let data = await fetchAuth('/api/admin/products');
     let html = `<table>
-        <thead>
-            <tr>
-                <th>ID</th>
-                <th>Name</th>
-                <th>Price</th>
-                <th>Stock</th>
-                <th>Unit</th>
-                <th>Weight Options</th>
-                <th>Category</th>
-                <th>Image URL</th>
-                <th>Action</th>
-            </tr>
-        </thead>
-        <tbody>
-    `;
+        <thead><tr><th>ID</th><th>Name</th><th>Price</th><th>Stock</th><th>Unit</th><th>Weight Options</th><th>Category</th><th>Image URL</th><th>Action</th></tr></thead>
+        <tbody>`;
     data.forEach(p => {
         html += `<tr>
             <td>${p.id}</td>
@@ -93,25 +74,21 @@ async function loadProducts() {
             <td><input id="price${p.id}" value="${p.price}"></td>
             <td><input id="stock${p.id}" value="${p.stock}"></td>
             <td><select id="unit${p.id}">
-                    <option value="kg" ${p.unit === 'kg' ? 'selected' : ''}>kg</option>
-                    <option value="piece" ${p.unit === 'piece' ? 'selected' : ''}>piece</option>
-                    <option value="bunch" ${p.unit === 'bunch' ? 'selected' : ''}>bunch</option>
-                    <option value="packet" ${p.unit === 'packet' ? 'selected' : ''}>packet</option>
-                </select></td>
+                <option value="kg" ${p.unit === 'kg' ? 'selected' : ''}>kg</option>
+                <option value="piece" ${p.unit === 'piece' ? 'selected' : ''}>piece</option>
+                <option value="bunch" ${p.unit === 'bunch' ? 'selected' : ''}>bunch</option>
+                <option value="packet" ${p.unit === 'packet' ? 'selected' : ''}>packet</option>
+            </select></td>
             <td><input id="weight${p.id}" value="${p.weight_options || '1kg,500g,250g'}" style="width:120px;"></td>
             <td><input id="cat${p.id}" value="${p.category || ''}"></td>
             <td><input id="img${p.id}" value="${p.image_url || ''}" style="width:150px;"></td>
-            <td>
-                <button onclick="updateProduct(${p.id})">Update</button>
-                <button onclick="deleteProduct(${p.id})">Delete</button>
-            </tr>
-        `;
+            <td><button onclick="updateProduct(${p.id})">Update</button> <button onclick="deleteProduct(${p.id})">Delete</button></td>
+        </tr>`;
     });
     html += `</tbody>~`;
     document.getElementById('products').innerHTML = html;
 }
 
-// ---------- Update product (including category, image, unit & weight options) ----------
 async function updateProduct(id) {
     let name = document.getElementById(`name${id}`).value;
     let price = document.getElementById(`price${id}`).value;
@@ -128,7 +105,6 @@ async function updateProduct(id) {
     loadProducts();
 }
 
-// ---------- Delete product ----------
 async function deleteProduct(id) {
     if (confirm('Delete this product?')) {
         await fetch(`/api/admin/products/${id}`, { method: 'DELETE' });
@@ -136,33 +112,22 @@ async function deleteProduct(id) {
     }
 }
 
-// ---------- Upload image to Imgur ----------
 async function uploadImage() {
     const fileInput = document.getElementById('imageUpload');
     const file = fileInput.files[0];
     if (!file) return alert('Select an image first');
-    
     const formData = new FormData();
     formData.append('image', file);
-    
     try {
-        const response = await fetch('/api/upload-image', {
-            method: 'POST',
-            body: formData
-        });
+        const response = await fetch('/api/upload-image', { method: 'POST', body: formData });
         const data = await response.json();
         if (data.success) {
             document.getElementById('newImageUrl').value = data.url;
             alert('Image uploaded successfully!');
-        } else {
-            alert('Upload failed: ' + (data.error || 'Unknown error'));
-        }
-    } catch (err) {
-        alert('Upload error: ' + err.message);
-    }
+        } else alert('Upload failed');
+    } catch (err) { alert('Upload error'); }
 }
 
-// ---------- Add new product with category, image, unit, and weight options ----------
 async function addProduct() {
     let name = document.getElementById('newName').value.trim();
     let price = document.getElementById('newPrice').value;
@@ -171,57 +136,32 @@ async function addProduct() {
     let weight_options = document.getElementById('newWeightOptions').value;
     let category = document.getElementById('newCategory').value;
     let image_url = document.getElementById('newImageUrl').value.trim();
-    
-    if (!name || !price || !stock) {
-        alert('Please fill Name, Price, and Stock');
-        return;
-    }
-    
+    if (!name || !price || !stock) return alert('Please fill required fields');
     const res = await fetch('/api/admin/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            name, price, stock, category, image_url, unit, weight_options,
-            description: ""
-        })
+        body: JSON.stringify({ name, price, stock, category, image_url, unit, weight_options, description: "" })
     });
     if (res.ok) {
         alert('Product added!');
-        // Clear form
         document.getElementById('newName').value = '';
         document.getElementById('newPrice').value = '';
         document.getElementById('newStock').value = '';
-        document.getElementById('newUnit').value = 'kg';
         document.getElementById('newWeightOptions').value = '1kg,500g,250g';
-        document.getElementById('newCategory').value = 'Vegetables';
         document.getElementById('newImageUrl').value = '';
         document.getElementById('imageUpload').value = '';
         loadProducts();
-    } else {
-        alert('Failed to add product');
-    }
+    } else alert('Failed to add product');
 }
 
-// ---------- Load orders with status badges and action buttons ----------
 async function loadOrders() {
     let orders = await fetchAuth('/api/admin/orders');
+    ordersData = orders;
     let html = `<table>
-        <thead>
-            <tr>
-                <th>ID</th>
-                <th>Customer</th>
-                <th>Total</th>
-                <th>Payment</th>
-                <th>Status</th>
-                <th>Delivery Slot</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-    `;
+        <thead><tr><th>ID</th><th>Customer</th><th>Total</th><th>Payment</th><th>Status</th><th>Delivery Slot</th><th>Actions</th></tr></thead>
+        <tbody>`;
     orders.forEach(o => {
         let statusClass = '';
-        let statusText = o.order_status;
         if (o.order_status === 'pending') statusClass = 'status-pending';
         else if (o.order_status === 'confirmed') statusClass = 'status-confirmed';
         else if (o.order_status === 'dispatched') statusClass = 'status-dispatched';
@@ -232,12 +172,12 @@ async function loadOrders() {
             <td>${o.customer_name}<br>${o.customer_phone}<br>${o.customer_address}</td>
             <td>₹${o.total_amount}</td>
             <td>${o.payment_status === 'paid' ? '✅ Paid' : '⏳ Pending'}</td>
-            <td><span class="${statusClass}">${statusText.toUpperCase()}</span></td>
+            <td><span class="${statusClass}">${o.order_status.toUpperCase()}</span></td>
             <td>${o.delivery_slot || 'Not selected'}</td>
             <td>
-                ${o.payment_status !== 'paid' ? `<button onclick="markPaid(${o.id})" style="background:#4caf50; color:white; margin:2px;">✅ Confirm Payment</button>` : ''}
-                ${o.payment_status === 'paid' && o.order_status === 'confirmed' ? `<button onclick="markDispatched(${o.id})" style="background:#2196f3; color:white; margin:2px;">🚚 Mark Dispatched</button>` : ''}
-                ${o.order_status === 'dispatched' ? `<button onclick="markDelivered(${o.id})" style="background:#ff9800; color:white; margin:2px;">🎉 Mark Delivered</button>` : ''}
+                ${o.payment_status !== 'paid' ? `<button onclick="markPaid(${o.id})" style="background:#4caf50; color:white;">✅ Confirm Payment & Send WhatsApp</button>` : ''}
+                ${o.payment_status === 'paid' && o.order_status === 'confirmed' ? `<button onclick="markDispatched(${o.id})" style="background:#2196f3; color:white;">🚚 Mark Dispatched & Send WhatsApp</button>` : ''}
+                ${o.order_status === 'dispatched' ? `<button onclick="markDelivered(${o.id})" style="background:#ff9800; color:white;">🎉 Mark Delivered & Send WhatsApp</button>` : ''}
                 ${o.order_status === 'delivered' ? '<span style="color:green;">✓ Completed</span>' : ''}
             </td>
         </tr>`;
@@ -246,30 +186,45 @@ async function loadOrders() {
     document.getElementById('orders').innerHTML = html;
 }
 
-// Confirm payment
 async function markPaid(id) {
-    if (confirm('Confirm payment for this order?')) {
-        await fetch(`/api/admin/orders/${id}/pay`, { method: 'PUT' });
-        loadOrders();
-        loadProducts();
+    const order = ordersData.find(o => o.id === id);
+    if (confirm(`Confirm payment for Order #${id}? WhatsApp will be sent to ${order.customer_phone}`)) {
+        const res = await fetch(`/api/admin/orders/${id}/pay`, { method: 'PUT' });
+        const data = await res.json();
+        if (data.success) {
+            const message = encodeURIComponent(`✅ Order #${id} CONFIRMED!\nAmount: ₹${order.total_amount}\nYour order will be prepared and dispatched soon. - Dad's Veggie Shop`);
+            window.open(`https://wa.me/${order.customer_phone}?text=${message}`, '_blank');
+            loadOrders();
+            loadProducts();
+        }
     }
 }
 
-// Mark as dispatched
 async function markDispatched(id) {
-    if (confirm('Mark this order as dispatched?')) {
-        await fetch(`/api/admin/orders/${id}/dispatch`, { method: 'PUT' });
-        loadOrders();
-        loadProducts();
+    const order = ordersData.find(o => o.id === id);
+    if (confirm(`Mark Order #${id} as dispatched? WhatsApp will be sent to ${order.customer_phone}`)) {
+        const res = await fetch(`/api/admin/orders/${id}/dispatch`, { method: 'PUT' });
+        const data = await res.json();
+        if (data.success) {
+            const message = encodeURIComponent(`🚚 Order #${id} DISPATCHED!\nYour order is on the way! - Dad's Veggie Shop`);
+            window.open(`https://wa.me/${order.customer_phone}?text=${message}`, '_blank');
+            loadOrders();
+            loadProducts();
+        }
     }
 }
 
-// Mark as delivered
 async function markDelivered(id) {
-    if (confirm('Mark this order as delivered?')) {
-        await fetch(`/api/admin/orders/${id}/deliver`, { method: 'PUT' });
-        loadOrders();
-        loadProducts();
+    const order = ordersData.find(o => o.id === id);
+    if (confirm(`Mark Order #${id} as delivered? WhatsApp will be sent to ${order.customer_phone}`)) {
+        const res = await fetch(`/api/admin/orders/${id}/deliver`, { method: 'PUT' });
+        const data = await res.json();
+        if (data.success) {
+            const message = encodeURIComponent(`🎉 Order #${id} DELIVERED!\nThank you for shopping with Dad's Veggie Shop! 🥬`);
+            window.open(`https://wa.me/${order.customer_phone}?text=${message}`, '_blank');
+            loadOrders();
+            loadProducts();
+        }
     }
 }
 
@@ -278,7 +233,6 @@ async function logout() {
     location.reload();
 }
 
-// ---------- Initial load and auto-refresh orders ----------
 loadProducts();
 loadOrders();
 setInterval(() => loadOrders(), 10000);
