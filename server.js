@@ -185,7 +185,9 @@ app.get('/admin-page', (req, res) => {
     }
 });
 
-app.listen(PORT, () => {
-    console.log(`✅ Veggie Shop running on http://localhost:${PORT}`);
-    console.log(`👉 Admin panel: http://localhost:${PORT}/admin-page (password: admin123)`);
+const HOST = '0.0.0.0';
+
+app.listen(PORT, HOST, () => {
+    console.log(`✅ Veggie Shop running on http://${HOST}:${PORT}`);
+    console.log(`👉 Admin panel: http://${HOST}:${PORT}/admin-page (password: admin123)`);
 });
