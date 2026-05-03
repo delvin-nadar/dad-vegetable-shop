@@ -8,7 +8,6 @@
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif; }
         body { background: #f8f9fa; color: #2d3e2b; }
         
-        /* Navbar */
         .navbar { background: #2e7d32; color: white; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
         .logo h2 { font-size: 1.8rem; letter-spacing: 1px; }
         .logo p { font-size: 0.8rem; opacity: 0.9; }
@@ -16,10 +15,8 @@
         .cart-icon:hover { background: #ffa726; transform: scale(1.02); }
         .admin-link { background: #ffd966; padding: 0.3rem 0.9rem; border-radius: 30px; text-decoration: none; color: #2d3e2b; font-weight: bold; }
         
-        /* Main container */
         .container { max-width: 1300px; margin: 2rem auto; padding: 0 1.5rem; }
         
-        /* Products grid */
         .products-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1.8rem; margin-top: 1rem; }
         .product-card { background: white; border-radius: 24px; overflow: hidden; box-shadow: 0 8px 20px rgba(0,0,0,0.05); transition: 0.2s; padding: 1rem; text-align: center; border: 1px solid #e9f0e6; position: relative; }
         .product-card:hover { transform: translateY(-5px); box-shadow: 0 15px 30px rgba(0,0,0,0.1); }
@@ -35,7 +32,6 @@
         .added-to-cart-badge { position: absolute; top: 10px; right: 10px; background: #ff9800; color: white; padding: 4px 8px; border-radius: 20px; font-size: 10px; font-weight: bold; }
         .weight-select { width: 100%; padding: 8px; margin: 8px 0; border-radius: 20px; border: 1px solid #ccc; background: white; cursor: pointer; }
         
-        /* Cart Sidebar */
         .cart-sidebar { position: fixed; top: 0; right: -400px; width: 380px; height: 100%; background: white; box-shadow: -5px 0 20px rgba(0,0,0,0.2); z-index: 1000; transition: 0.3s; padding: 1.5rem; overflow-y: auto; display: flex; flex-direction: column; }
         .cart-sidebar.open { right: 0; }
         .cart-header { display: flex; justify-content: space-between; font-size: 1.5rem; font-weight: bold; border-bottom: 2px solid #e0e0e0; padding-bottom: 0.8rem; }
@@ -45,18 +41,15 @@
         .cart-total { font-size: 1.3rem; font-weight: bold; border-top: 2px solid #ccc; padding-top: 0.8rem; text-align: right; }
         .checkout-btn { background: #ff9800; width: 100%; padding: 0.8rem; border: none; border-radius: 50px; font-weight: bold; font-size: 1rem; margin-top: 1rem; cursor: pointer; }
         
-        /* Order Modal */
         .order-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; width: 90%; max-width: 500px; z-index: 1100; border-radius: 28px; padding: 1.8rem; display: none; box-shadow: 0 20px 35px rgba(0,0,0,0.2); }
         .order-modal.open { display: block; }
         .order-modal input, .order-modal textarea, .order-modal select { width: 100%; padding: 0.7rem; margin: 0.5rem 0; border: 1px solid #ccc; border-radius: 20px; }
         .qr-area { text-align: center; margin: 1rem 0; }
         .payment-note { background: #e8f5e9; padding: 12px; border-radius: 16px; text-align: center; margin: 15px 0; font-size: 14px; border-left: 4px solid #4caf50; }
         
-        /* Overlay */
         .overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 999; display: none; }
         .overlay.active { display: block; }
         
-        /* Tracking & Footer */
         .order-tracking { margin: 20px 0; padding: 15px; background: #f5f5f5; border-radius: 16px; }
         .order-tracking input { width: 250px; display: inline-block; margin-right: 10px; }
         .track-result-card { background: #e8f5e9; padding: 15px; border-radius: 12px; margin-bottom: 10px; }
@@ -98,7 +91,6 @@
         🍽️ <strong>We take bulk orders for Caterers/Restaurants</strong> — Contact us for wholesale pricing!
     </div>
     
-    <!-- Order Tracking Section -->
     <div class="order-tracking">
         <h3>🔍 Track Your Orders</h3>
         <input type="tel" id="trackPhone" placeholder="Enter 10-digit Mobile Number" maxlength="10">
@@ -117,7 +109,6 @@
     <div id="productsContainer" class="products-grid">Loading vegetables...</div>
 </div>
 
-<!-- Cart Sidebar -->
 <div class="cart-sidebar" id="cartSidebar">
     <div class="cart-header">
         <span>Your Cart</span>
@@ -132,7 +123,6 @@
 
 <div class="overlay" id="overlay"></div>
 
-<!-- Order & QR Modal -->
 <div class="order-modal" id="orderModal">
     <h3>📝 Delivery Details</h3>
     <input type="text" id="customerName" placeholder="Full Name" required>
@@ -189,7 +179,6 @@
     const overlay = document.getElementById('overlay');
     const orderModal = document.getElementById('orderModal');
 
-    // Double back exit with confirmation
     window.addEventListener('popstate', function() {
         if (cartSidebar.classList.contains('open')) {
             cartSidebar.classList.remove('open');
@@ -209,10 +198,7 @@
                     backPressCount = 0;
                     history.pushState(null, null, window.location.href);
                 }
-                
-                backPressTimer = setTimeout(() => {
-                    backPressCount = 0;
-                }, 2000);
+                backPressTimer = setTimeout(() => { backPressCount = 0; }, 2000);
             } else {
                 window.close();
                 history.back();
@@ -221,34 +207,22 @@
     });
     history.pushState(null, null, window.location.href);
 
-    // Helper: Validate 10-digit phone
-    function validatePhone(phone) {
-        return /^\d{10}$/.test(phone);
-    }
+    function validatePhone(phone) { return /^\d{10}$/.test(phone); }
+    function calculateDelivery(totalAmount) { return totalAmount >= 100 ? 0 : 30; }
 
-    // Helper: delivery charge calculation
-    function calculateDelivery(totalAmount) {
-        return totalAmount >= 100 ? 0 : 30;
-    }
-
-    // Load products with cache busting
     async function loadProducts() {
-    try {
-        // Add timestamp to prevent caching
-        const res = await fetch('/api/products?_=' + Date.now(), {
-            cache: 'no-store',
-            headers: {
-                'Cache-Control': 'no-cache',
-                'Pragma': 'no-cache'
-            }
-        });
-        const data = await res.json();
-        allProducts = data.products;
-        renderProducts(allProducts);
-    } catch (err) {
-        productsContainer.innerHTML = '<p>Error loading veggies. Please refresh.</p>';
+        try {
+            const res = await fetch('/api/products?_=' + Date.now(), {
+                cache: 'no-store',
+                headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+            });
+            const data = await res.json();
+            allProducts = data.products;
+            renderProducts(allProducts);
+        } catch (err) {
+            productsContainer.innerHTML = '<p>Error loading veggies. Please refresh.</p>';
+        }
     }
-}
 
     function getCartQuantity(productId) {
         const item = cart.find(item => item.productId === productId);
@@ -261,7 +235,6 @@
             return;
         }
         
-        // Add cache-busting timestamp to images
         const cacheBuster = Date.now();
         
         productsContainer.innerHTML = productsToRender.map(p => {
@@ -287,13 +260,12 @@
                 </select>`;
             }
             
-            // Add cache-busting query parameter to image URL
-            const imageUrl = p.image_url ? `${p.image_url}?t=${cacheBuster}` : 'https://via.placeholder.com/150?text=Veg';
+            const imageUrl = p.image_url ? `${p.image_url}?t=${cacheBuster}` : 'https://cdn.pixabay.com/photo/2020/06/01/13/55/tomatoes-5247827_640.jpg';
             
             return `
                 <div class="product-card">
                     ${inCart ? '<div class="added-to-cart-badge">✓ Added to Cart</div>' : ''}
-<img class="product-img" src="${imageUrl}" alt="${p.name}">
+                    <img class="product-img" src="${imageUrl}" alt="${p.name}">
                     <div class="product-name">${p.name}</div>
                     <div class="product-price">₹${p.price}/${unitDisplay}</div>
                     <div class="product-category">${p.category || 'Vegetables'}</div>
@@ -306,7 +278,6 @@
             `;
         }).join('');
 
-        // Attach add to cart events
         document.querySelectorAll('.add-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 const id = parseInt(btn.dataset.id);
@@ -314,7 +285,6 @@
                 const basePrice = parseFloat(btn.dataset.price);
                 const unit = btn.dataset.unit;
                 const stock = parseInt(btn.dataset.stock);
-                
                 const weightSelect = document.querySelector(`.weight-select[data-id="${id}"]`);
                 const selectedWeight = weightSelect ? weightSelect.value : null;
                 
@@ -355,17 +325,14 @@
         const subtotal = cart.reduce((sum, i) => sum + (i.price * i.quantity), 0);
         const delivery = calculateDelivery(subtotal);
         const total = subtotal + delivery;
-        
         document.getElementById('cartCount').innerText = cart.reduce((sum, i) => sum + i.quantity, 0);
         document.getElementById('cartSubtotal').innerText = subtotal.toFixed(2);
         document.getElementById('deliveryCharge').innerText = delivery;
         document.getElementById('cartTotalAmount').innerText = total.toFixed(2);
-
         if (cart.length === 0) {
             document.getElementById('cartItemsList').innerHTML = 'Cart is empty 🛒';
             return;
         }
-        
         document.getElementById('cartItemsList').innerHTML = cart.map((item, idx) => `
             <div class="cart-item">
                 <span>${item.name} (${item.weight}) x${item.quantity}</span>
@@ -374,7 +341,6 @@
                 </span>
             </div>
         `).join('');
-        
         document.querySelectorAll('.cart-item button').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 const idx = parseInt(btn.dataset.idx);
@@ -396,7 +362,6 @@
     }
     window.filterProducts = filterProducts;
 
-    // Cart sidebar controls
     document.getElementById('cartIcon').onclick = () => {
         cartSidebar.classList.add('open');
         overlay.classList.add('active');
@@ -422,7 +387,6 @@
         document.getElementById('checkoutFormSection').style.display = 'block';
     };
 
-    // Place order
     document.getElementById('placeOrderBtn').onclick = async () => {
         const name = document.getElementById('customerName').value.trim();
         const phone = document.getElementById('customerPhone').value.trim();
@@ -460,7 +424,6 @@
             const data = await res.json();
             if (!res.ok) return alert(data.error);
             
-            // Success message with order details
             alert(`✅ Order Confirmed!\n\nOrder ID: ${data.orderId}\nTotal: ₹${data.totalAmount}\n\nYou can pay now using the QR code.`);
             
             currentUpiIntentUrl = data.upiIntentUrl;
@@ -481,21 +444,18 @@
         }
     };
 
-    // Close modal with thank you message
     document.getElementById('closeModalBtn').onclick = () => {
         orderModal.classList.remove('open');
         overlay.classList.remove('active');
         alert('✅ Your order has been placed successfully!\n\nYou will receive updates on WhatsApp.\n\nThank you for shopping with us! 🥬');
     };
 
-    // Pay with UPI App redirect
     document.getElementById('payWithAppBtn')?.addEventListener('click', () => {
         if (currentUpiIntentUrl) {
             window.location.href = currentUpiIntentUrl;
         }
     });
 
-    // Track orders by phone number
     window.trackOrders = async function() {
         const phone = document.getElementById('trackPhone').value.trim();
         if (!validatePhone(phone)) return alert('Please enter a valid 10-digit mobile number');

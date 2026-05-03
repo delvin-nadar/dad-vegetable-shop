@@ -92,14 +92,11 @@
 </div>
 
 <script>
-// ==================== HELPER FUNCTION ====================
 async function fetchAuth(url, opts={}) {
     const res = await fetch(url, opts);
     if (res.status === 401) { alert("Session expired. Please login again."); location.reload(); }
     return res.json();
 }
-
-// ==================== IMAGE FUNCTIONS ====================
 
 async function fetchProductImage() {
     const productName = document.getElementById('newName').value.trim();
@@ -118,7 +115,7 @@ async function fetchProductImage() {
         
         if (data.success) {
             document.getElementById('newImageUrl').value = data.imageUrl;
-            alert(`✅ Image found on ${data.source}!\nPhoto by: ${data.photographer}`);
+            alert(`✅ Image found!\nPhoto by: ${data.photographer}`);
         } else {
             alert('No image found. Please add manually.');
         }
@@ -214,11 +211,9 @@ async function bulkFetchImages() {
     }
 }
 
-// ==================== PRODUCT FUNCTIONS ====================
-
 async function loadProducts() {
     let data = await fetchAuth('/api/admin/products');
-    let html = `<table>
+    let html = `<tr>
         <thead>
             <tr><th>ID</th><th>Name</th><th>Price</th><th>Stock</th><th>Unit</th><th>Weight Options</th><th>Category</th><th>Image</th><th>Action</th></tr>
         </thead>
@@ -238,7 +233,7 @@ async function loadProducts() {
                 </select></td>
             <td><input id="weight${p.id}" value="${p.weight_options || '250g,500g,1kg'}"></td>
             <td><input id="cat${p.id}" value="${p.category || ''}"></td>
-            <td><input id="img${p.id}" value="${p.image_url || ''}" style="width:150px;"></td>
+            <td><img src="${p.image_url}" style="max-width:50px; max-height:50px; border-radius:8px;" onerror="this.style.display='none'"><br><input id="img${p.id}" value="${p.image_url || ''}" style="width:150px;"></td>
             <td>
                 <button onclick="updateProduct(${p.id})">Update</button>
                 <button onclick="deleteProduct(${p.id})">Delete</button>
@@ -246,7 +241,6 @@ async function loadProducts() {
             </td>
         </tr>`;
     });
-    
     html += `</tbody>~`;
     document.getElementById('products').innerHTML = html;
 }
@@ -300,7 +294,6 @@ async function addProduct() {
     } else alert('Failed to add product');
 }
 
-// ==================== BULK UPLOAD HANDLER ====================
 document.getElementById('bulkUploadForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const fileInput = document.getElementById('csvFile');
@@ -341,7 +334,6 @@ document.getElementById('bulkUploadForm').addEventListener('submit', async (e) =
     }
 });
 
-// ==================== ORDER FUNCTIONS ====================
 let ordersData = [];
 
 async function loadOrders() {
@@ -412,7 +404,6 @@ async function logout() {
     location.reload();
 }
 
-// ==================== INITIAL LOAD ====================
 loadProducts();
 loadOrders();
 setInterval(() => loadOrders(), 10000);
