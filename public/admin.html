@@ -92,8 +92,7 @@
 </div>
 
 <script>
-let ordersData = [];
-
+// ==================== HELPER FUNCTION ====================
 async function fetchAuth(url, opts={}) {
     const res = await fetch(url, opts);
     if (res.status === 401) { alert("Session expired. Please login again."); location.reload(); }
@@ -119,12 +118,12 @@ async function fetchProductImage() {
         
         if (data.success) {
             document.getElementById('newImageUrl').value = data.imageUrl;
-            alert(`✅ Image found on ${data.source}!\nPhoto by: ${data.photographer}\n\nThe image URL has been added.`);
+            alert(`✅ Image found on ${data.source}!\nPhoto by: ${data.photographer}`);
         } else {
-            alert('No image found. Please add manually or try a different product name.');
+            alert('No image found. Please add manually.');
         }
     } catch (err) {
-        alert('Error fetching image. Please add manually.');
+        alert('Error fetching image.');
     } finally {
         button.textContent = '🔍 Auto‑fetch Image';
         button.disabled = false;
@@ -147,13 +146,84 @@ async function uploadImage() {
     } catch (err) { alert('Upload error'); }
 }
 
+async function fetchSingleImage(productId, productName) {
+    if (!confirm(`Fetch image for ${productName}?`)) return;
+    
+    const buttons = document.querySelectorAll(`button[onclick*="fetchSingleImage(${productId},"]`);
+    const button = buttons[0];
+    if (!button) {
+        alert('Button not found');
+        return;
+    }
+    
+    const originalText = button.textContent;
+    button.textContent = '⏳ Fetching...';
+    button.disabled = true;
+    
+    try {
+        const response = await fetch(`/api/admin/fetch-single-image/${productId}`, { method: 'POST' });
+        const data = await response.json();
+        
+        if (data.success) {
+            alert(`✅ ${data.message}`);
+            loadProducts();
+        } else {
+            alert(`❌ ${data.message || 'No image found'}`);
+        }
+    } catch (err) {
+        alert('Error fetching image');
+    } finally {
+        button.textContent = originalText;
+        button.disabled = false;
+    }
+}
+
+async function bulkFetchImages() {
+    if (!confirm('Fetch images for ALL products without images? This may take a few minutes.')) return;
+    
+    const resultDiv = document.getElementById('bulkImageResult');
+    resultDiv.style.display = 'block';
+    resultDiv.innerHTML = '<div style="background:#fff3cd; padding:15px;">⏳ Fetching images... Please wait.</div>';
+    
+    try {
+        const response = await fetch('/api/admin/bulk-fetch-images', { method: 'POST' });
+        const data = await response.json();
+        
+        if (data.success) {
+            let html = `<div style="background:#d4edda; padding:15px;">
+                <strong>✅ ${data.message}</strong><br>
+                Total: ${data.total} | Fetched: ${data.updated} | Failed: ${data.failed}<br>`;
+            
+            if (data.results && data.results.length > 0) {
+                html += `<details><summary>View Details</summary><ul>`;
+                data.results.forEach(r => {
+                    if (r.status === 'success') {
+                        html += `<li style="color:green;">✅ ${r.name}</li>`;
+                    } else {
+                        html += `<li style="color:red;">❌ ${r.name} - ${r.reason}</li>`;
+                    }
+                });
+                html += `</ul></details>`;
+            }
+            html += `</div>`;
+            resultDiv.innerHTML = html;
+            loadProducts();
+        }
+    } catch (err) {
+        resultDiv.innerHTML = `<div style="background:#f8d7da; padding:15px;">❌ Error: ${err.message}</div>`;
+    }
+}
+
 // ==================== PRODUCT FUNCTIONS ====================
 
 async function loadProducts() {
     let data = await fetchAuth('/api/admin/products');
     let html = `<table>
-        <thead><tr><th>ID</th><th>Name</th><th>Price</th><th>Stock</th><th>Unit</th><th>Weight Options</th><th>Category</th><th>Image</th><th>Action</th></tr></thead>
+        <thead>
+            <tr><th>ID</th><th>Name</th><th>Price</th><th>Stock</th><th>Unit</th><th>Weight Options</th><th>Category</th><th>Image</th><th>Action</th></tr>
+        </thead>
         <tbody>`;
+    
     data.forEach(p => {
         html += `<tr>
             <td>${p.id}</td>
@@ -161,21 +231,22 @@ async function loadProducts() {
             <td><input id="price${p.id}" value="${p.price}"></td>
             <td><input id="stock${p.id}" value="${p.stock}"></td>
             <td><select id="unit${p.id}">
-                <option value="kg" ${p.unit === 'kg' ? 'selected' : ''}>kg</option>
-                <option value="piece" ${p.unit === 'piece' ? 'selected' : ''}>piece</option>
-                <option value="bunch" ${p.unit === 'bunch' ? 'selected' : ''}>bunch</option>
-                <option value="packet" ${p.unit === 'packet' ? 'selected' : ''}>packet</option>
-            </select></td>
-            <td><input id="weight${p.id}" value="${p.weight_options || '250g,500g,1kg'}" style="width:120px;"></td>
+                    <option value="kg" ${p.unit === 'kg' ? 'selected' : ''}>kg</option>
+                    <option value="piece" ${p.unit === 'piece' ? 'selected' : ''}>piece</option>
+                    <option value="bunch" ${p.unit === 'bunch' ? 'selected' : ''}>bunch</option>
+                    <option value="packet" ${p.unit === 'packet' ? 'selected' : ''}>packet</option>
+                </select></td>
+            <td><input id="weight${p.id}" value="${p.weight_options || '250g,500g,1kg'}"></td>
             <td><input id="cat${p.id}" value="${p.category || ''}"></td>
-            <td>${p.image_url ? `<img src="${p.image_url}" class="image-preview" onerror="this.style.display='none'">` : 'No image'} <br><input id="img${p.id}" value="${p.image_url || ''}" style="width:150px;"></td>
+            <td><input id="img${p.id}" value="${p.image_url || ''}" style="width:150px;"></td>
             <td>
                 <button onclick="updateProduct(${p.id})">Update</button>
                 <button onclick="deleteProduct(${p.id})">Delete</button>
-                <button onclick="fetchSingleImage(${p.id}, '${p.name.replace(/'/g, "\\'")}')" style="background:#9c27b0; color:white; margin-left:5px;">🖼️ Fetch</button>
+                <button onclick="fetchSingleImage(${p.id}, '${p.name.replace(/'/g, "\\'")}')" style="background:#9c27b0; color:white;">🖼️ Fetch</button>
             </td>
         </tr>`;
     });
+    
     html += `</tbody>~`;
     document.getElementById('products').innerHTML = html;
 }
@@ -229,168 +300,57 @@ async function addProduct() {
     } else alert('Failed to add product');
 }
 
-// ==================== BULK UPLOAD FUNCTIONS ====================
-
+// ==================== BULK UPLOAD HANDLER ====================
 document.getElementById('bulkUploadForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    
     const fileInput = document.getElementById('csvFile');
     const file = fileInput.files[0];
-    
-    if (!file) {
-        alert('Please select a CSV file');
-        return;
-    }
-    
-    if (!file.name.endsWith('.csv')) {
-        alert('Please upload a CSV file');
-        return;
-    }
+    if (!file) return alert('Please select a CSV file');
+    if (!file.name.endsWith('.csv')) return alert('Please upload a CSV file');
     
     const formData = new FormData();
     formData.append('csvFile', file);
     
     const resultDiv = document.getElementById('bulkUploadResult');
     resultDiv.style.display = 'block';
-    resultDiv.innerHTML = '<div style="background:#fff3cd; padding:15px; border-radius:12px;">⏳ Uploading and processing... Please wait.</div>';
+    resultDiv.innerHTML = '<div style="background:#fff3cd; padding:15px;">⏳ Uploading...</div>';
     
     try {
-        const response = await fetch('/api/admin/products/bulk', {
-            method: 'POST',
-            body: formData
-        });
-        
+        const response = await fetch('/api/admin/products/bulk', { method: 'POST', body: formData });
         const data = await response.json();
         
         if (data.success) {
-            let html = `<div style="background:#d4edda; padding:15px; border-radius:12px;">
-                <strong>✅ ${data.message}</strong><br>`;
-            
+            let html = `<div style="background:#d4edda; padding:15px;"><strong>✅ ${data.message}</strong><br>`;
             if (data.inserted && data.inserted.length > 0) {
-                html += `<br><strong>Added Products:</strong><ul>`;
-                data.inserted.forEach(p => {
-                    html += `<li>#${p.id} - ${p.name}</li>`;
-                });
+                html += `<br><strong>Added:</strong><ul>`;
+                data.inserted.forEach(p => { html += `<li>#${p.id} - ${p.name}</li>`; });
                 html += `</ul>`;
             }
-            
             if (data.errors && data.errors.length > 0) {
-                html += `<br><strong>⚠️ Errors:</strong><ul style="color:#856404;">`;
-                data.errors.forEach(err => {
-                    html += `<li>${err}</li>`;
-                });
+                html += `<br><strong>Errors:</strong><ul>`;
+                data.errors.forEach(err => { html += `<li>${err}</li>`; });
                 html += `</ul>`;
             }
-            
             html += `</div>`;
             resultDiv.innerHTML = html;
-            
             loadProducts();
             fileInput.value = '';
-        } else {
-            resultDiv.innerHTML = `<div style="background:#f8d7da; padding:15px; border-radius:12px;">
-                <strong>❌ Error:</strong> ${data.error || 'Upload failed'}
-            </div>`;
         }
     } catch (err) {
-        resultDiv.innerHTML = `<div style="background:#f8d7da; padding:15px; border-radius:12px;">
-            <strong>❌ Error:</strong> ${err.message}
-        </div>`;
+        resultDiv.innerHTML = `<div style="background:#f8d7da; padding:15px;">❌ Error: ${err.message}</div>`;
     }
 });
 
-// ==================== BULK IMAGE FETCH FUNCTIONS ====================
-
-async function bulkFetchImages() {
-    if (!confirm('This will search and add images for ALL products without images. Continue?')) {
-        return;
-    }
-    
-    const resultDiv = document.getElementById('bulkImageResult');
-    resultDiv.style.display = 'block';
-    resultDiv.innerHTML = '<div style="background:#fff3cd; padding:15px; border-radius:12px;">⏳ Fetching images for all products... This may take a few minutes.</div>';
-    
-    try {
-        const response = await fetch('/api/admin/bulk-fetch-images', {
-            method: 'POST'
-        });
-        const data = await response.json();
-        
-        if (data.success) {
-            let html = `<div style="background:#d4edda; padding:15px; border-radius:12px;">
-                <strong>✅ ${data.message}</strong><br>
-                Total products processed: ${data.total}<br>
-                Images fetched: ${data.updated}<br>
-                Failed: ${data.failed}<br><br>`;
-            
-            if (data.results && data.results.length > 0) {
-                html += `<details>
-                    <summary>View Details</summary>
-                    <ul style="margin-top:10px; max-height:200px; overflow-y:auto;">`;
-                
-                data.results.forEach(r => {
-                    if (r.status === 'success') {
-                        html += `<li style="color:green;">✅ ${r.name}</li>`;
-                    } else {
-                        html += `<li style="color:red;">❌ ${r.name} - ${r.reason}</li>`;
-                    }
-                });
-                
-                html += `</ul></details>`;
-            }
-            
-            html += `</div>`;
-            resultDiv.innerHTML = html;
-            
-            loadProducts();
-        } else {
-            resultDiv.innerHTML = `<div style="background:#f8d7da; padding:15px; border-radius:12px;">
-                <strong>❌ Error:</strong> ${data.error}
-            </div>`;
-        }
-    } catch (err) {
-        resultDiv.innerHTML = `<div style="background:#f8d7da; padding:15px; border-radius:12px;">
-            <strong>❌ Error:</strong> ${err.message}
-        </div>`;
-    }
-}
-
-async function fetchSingleImage(productId, productName) {
-    if (!confirm(`Fetch image for ${productName}?`)) return;
-    
-    const buttons = document.querySelectorAll(`button[onclick*="fetchSingleImage(${productId},"]`);
-    const button = buttons[0];
-    const originalText = button.textContent;
-    button.textContent = '⏳ Fetching...';
-    button.disabled = true;
-    
-    try {
-        const response = await fetch(`/api/admin/fetch-single-image/${productId}`, {
-            method: 'POST'
-        });
-        const data = await response.json();
-        
-        if (data.success) {
-            alert(`✅ ${data.message}`);
-            loadProducts();
-        } else {
-            alert(`❌ ${data.message}`);
-        }
-    } catch (err) {
-        alert('Error fetching image');
-    } finally {
-        button.textContent = originalText;
-        button.disabled = false;
-    }
-}
-
 // ==================== ORDER FUNCTIONS ====================
+let ordersData = [];
 
 async function loadOrders() {
     let orders = await fetchAuth('/api/admin/orders');
     ordersData = orders;
     let html = `<table>
-        <thead><tr><th>ID</th><th>Customer</th><th>Total</th><th>Payment</th><th>Status</th><th>Delivery Slot</th><th>Actions</th></tr></thead>
+        <thead>
+            <tr><th>ID</th><th>Customer</th><th>Total</th><th>Payment</th><th>Status</th><th>Delivery Slot</th><th>Actions</th></tr>
+        </thead>
         <tbody>`;
     orders.forEach(o => {
         let statusClass = '';
@@ -407,10 +367,9 @@ async function loadOrders() {
             <td><span class="${statusClass}">${o.order_status.toUpperCase()}</span></td>
             <td>${o.delivery_slot || 'Not selected'}</td>
             <td>
-                ${o.payment_status !== 'paid' ? `<button onclick="markPaid(${o.id})" style="background:#4caf50; color:white;">✅ Confirm Payment & Send WhatsApp</button>` : ''}
-                ${o.payment_status === 'paid' && o.order_status === 'confirmed' ? `<button onclick="markDispatched(${o.id})" style="background:#2196f3; color:white;">🚚 Mark Dispatched & Send WhatsApp</button>` : ''}
-                ${o.order_status === 'dispatched' ? `<button onclick="markDelivered(${o.id})" style="background:#ff9800; color:white;">🎉 Mark Delivered & Send WhatsApp</button>` : ''}
-                ${o.order_status === 'delivered' ? '<span style="color:green;">✓ Completed</span>' : ''}
+                ${o.payment_status !== 'paid' ? `<button onclick="markPaid(${o.id})" style="background:#4caf50; color:white;">✅ Confirm Payment</button>` : ''}
+                ${o.payment_status === 'paid' && o.order_status === 'confirmed' ? `<button onclick="markDispatched(${o.id})" style="background:#2196f3; color:white;">🚚 Mark Dispatched</button>` : ''}
+                ${o.order_status === 'dispatched' ? `<button onclick="markDelivered(${o.id})" style="background:#ff9800; color:white;">🎉 Mark Delivered</button>` : ''}
             </td>
         </tr>`;
     });
@@ -420,89 +379,37 @@ async function loadOrders() {
 
 async function markPaid(id) {
     const order = ordersData.find(o => o.id === id);
-    if (confirm(`Confirm payment for Order #${id}? WhatsApp will be sent to ${order.customer_phone}`)) {
-        const res = await fetch(`/api/admin/orders/${id}/pay`, { method: 'PUT' });
-        const data = await res.json();
-        if (data.success) {
-            const message = encodeURIComponent(`✅ Order #${id} CONFIRMED!\nAmount: ₹${order.total_amount}\nYour order will be prepared and dispatched soon. - Dad's Veggie Shop`);
-            window.open(`https://wa.me/${order.customer_phone}?text=${message}`, '_blank');
-            loadOrders();
-            loadProducts();
-        }
+    if (confirm(`Confirm payment for Order #${id}?`)) {
+        await fetch(`/api/admin/orders/${id}/pay`, { method: 'PUT' });
+        loadOrders();
+        loadProducts();
+        window.open(`https://wa.me/${order.customer_phone}?text=${encodeURIComponent(`✅ Order #${id} CONFIRMED!\nAmount: ₹${order.total_amount}`)}`, '_blank');
     }
 }
 
 async function markDispatched(id) {
     const order = ordersData.find(o => o.id === id);
-    if (confirm(`Mark Order #${id} as dispatched? WhatsApp will be sent to ${order.customer_phone}`)) {
-        const res = await fetch(`/api/admin/orders/${id}/dispatch`, { method: 'PUT' });
-        const data = await res.json();
-        if (data.success) {
-            const message = encodeURIComponent(`🚚 Order #${id} DISPATCHED!\nYour order is on the way! - Dad's Veggie Shop`);
-            window.open(`https://wa.me/${order.customer_phone}?text=${message}`, '_blank');
-            loadOrders();
-            loadProducts();
-        }
+    if (confirm(`Mark Order #${id} as dispatched?`)) {
+        await fetch(`/api/admin/orders/${id}/dispatch`, { method: 'PUT' });
+        loadOrders();
+        loadProducts();
+        window.open(`https://wa.me/${order.customer_phone}?text=${encodeURIComponent(`🚚 Order #${id} DISPATCHED! Your order is on the way!`)}`, '_blank');
     }
 }
 
 async function markDelivered(id) {
     const order = ordersData.find(o => o.id === id);
-    if (confirm(`Mark Order #${id} as delivered? WhatsApp will be sent to ${order.customer_phone}`)) {
-        const res = await fetch(`/api/admin/orders/${id}/deliver`, { method: 'PUT' });
-        const data = await res.json();
-        if (data.success) {
-            const message = encodeURIComponent(`🎉 Order #${id} DELIVERED!\nThank you for shopping with Dad's Veggie Shop! 🥬`);
-            window.open(`https://wa.me/${order.customer_phone}?text=${message}`, '_blank');
-            loadOrders();
-            loadProducts();
-        }
+    if (confirm(`Mark Order #${id} as delivered?`)) {
+        await fetch(`/api/admin/orders/${id}/deliver`, { method: 'PUT' });
+        loadOrders();
+        loadProducts();
+        window.open(`https://wa.me/${order.customer_phone}?text=${encodeURIComponent(`🎉 Order #${id} DELIVERED! Thank you for shopping with us!`)}`, '_blank');
     }
 }
 
 async function logout() {
     await fetch('/admin/logout');
     location.reload();
-}
-
-// ==================== SINGLE IMAGE FETCH FUNCTION ====================
-async function fetchSingleImage(productId, productName) {
-    if (!confirm(`Fetch image for ${productName}? This will search Pixabay for a matching image.`)) {
-        return;
-    }
-    
-    // Find the button that was clicked
-    const buttons = document.querySelectorAll(`button[onclick*="fetchSingleImage(${productId},"]`);
-    const button = buttons[0];
-    if (!button) {
-        console.error('Button not found');
-        return;
-    }
-    
-    const originalText = button.textContent;
-    button.textContent = '⏳ Searching...';
-    button.disabled = true;
-    
-    try {
-        const response = await fetch(`/api/admin/fetch-single-image/${productId}`, {
-            method: 'POST'
-        });
-        const data = await response.json();
-        
-        if (data.success) {
-            alert(`✅ ${data.message}`);
-            // Refresh the product list to show the new image
-            loadProducts();
-        } else {
-            alert(`❌ ${data.message || 'No image found for this product'}`);
-        }
-    } catch (err) {
-        console.error('Fetch error:', err);
-        alert('❌ Error fetching image. Please try again.');
-    } finally {
-        button.textContent = originalText;
-        button.disabled = false;
-    }
 }
 
 // ==================== INITIAL LOAD ====================
