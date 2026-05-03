@@ -1,700 +1,500 @@
-const express = require('express');
-const Database = require('better-sqlite3');
-const path = require('path');
-const session = require('express-session');
-const QRCode = require('qrcode');
-const bodyParser = require('body-parser');
-const multer = require('multer');
-const upload = multer({ storage: multer.memoryStorage() });
-const axios = require('axios');
-const FormData = require('form-data');
-const csv = require('csv-parser');
-const fs = require('fs');
-
-const app = express();
-const PORT = process.env.PORT || 3000;
-const HOST = '0.0.0.0';
-
-// ==================== SECURE ADMIN PASSWORD ====================
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
-
-if (!ADMIN_PASSWORD) {
-    console.error('❌ FATAL ERROR: ADMIN_PASSWORD environment variable is not set!');
-    console.error('👉 Please set ADMIN_PASSWORD in Render dashboard -> Environment Variables');
-    process.exit(1);
-}
-
-app.use(bodyParser.json());
-app.use(express.static(path.join(__dirname, 'public')));
-app.use('/product_images', express.static(path.join(__dirname, 'public', 'product_images')));
-app.use(session({ secret: 'dadveggie123', resave: false, saveUninitialized: true, cookie: { secure: false } }));
-
-// ==================== GOOGLE SHEETS INTEGRATION ====================
-const GOOGLE_SHEETS_WEBHOOK = process.env.GOOGLE_SHEETS_WEBHOOK || 'https://script.google.com/macros/s/AKfycbzeQ_XWvNtpcbcjIS3nMIQf6UJ9_uLSdzgF9U5y_wWnaIe3E9FCjEghUyPVWQP3IUDU/exec';
-
-async function addToGoogleSheets(customerData) {
-    try {
-        await axios.post(GOOGLE_SHEETS_WEBHOOK, customerData, {
-            headers: { 'Content-Type': 'application/json' }
-        });
-        console.log('✅ Customer data saved to Google Sheets');
-    } catch (e) {
-        console.log('Google Sheets save failed:', e.message);
-    }
-}
-
-// ==================== WHATSAPP NOTIFICATION FUNCTIONS ====================
-async function sendWhatsAppMessage(phone, message) {
-    const apiKey = process.env.CALLMEBOT_API_KEY || '';
-    if (!apiKey) {
-        console.log('⚠️ CallMeBot API key not configured');
-        return false;
-    }
-    const url = `https://api.callmebot.com/whatsapp.php?phone=${phone}&text=${encodeURIComponent(message)}&apikey=${apiKey}`;
-    try {
-        await axios.get(url);
-        console.log(`✅ WhatsApp sent to ${phone}`);
-        return true;
-    } catch(e) { 
-        console.log('WhatsApp failed:', e.message);
-        return false;
-    }
-}
-
-// ==================== TELEGRAM NOTIFICATION ====================
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '853947915';
-
-async function sendTelegramAlert(message) {
-    if (!TELEGRAM_BOT_TOKEN) {
-        console.log('⚠️ Telegram bot token not configured.');
-        return;
-    }
-    try {
-        const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-        await axios.post(url, {
-            chat_id: TELEGRAM_CHAT_ID,
-            text: message,
-            parse_mode: 'HTML'
-        });
-        console.log('✅ Telegram alert sent');
-    } catch (e) {
-        console.log('Telegram alert failed:', e.message);
-    }
-}
-
-// ==================== IMAGE HANDLING ====================
-const uploadsDir = path.join(__dirname, 'public', 'product_images');
-if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSync(uploadsDir, { recursive: true });
-}
-
-async function saveImageLocally(imageUrl, productName) {
-    try {
-        const response = await axios({
-            method: 'GET',
-            url: imageUrl,
-            responseType: 'stream',
-            timeout: 10000
-        });
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>Dad's Fresh Veggies - Organic Vegetable Shop</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif; }
+        body { background: #f8f9fa; color: #2d3e2b; }
         
-        const extension = imageUrl.split('.').pop().split('?')[0];
-        const safeName = productName.toLowerCase().replace(/[^a-z0-9]/g, '_');
-        const filename = `${Date.now()}_${safeName}.${extension === 'jpg' || extension === 'jpeg' || extension === 'png' ? extension : 'jpg'}`;
-        const localPath = `/product_images/${filename}`;
-        const filePath = path.join(__dirname, 'public', localPath);
+        .navbar { background: #2e7d32; color: white; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        .logo h2 { font-size: 1.8rem; letter-spacing: 1px; }
+        .logo p { font-size: 0.8rem; opacity: 0.9; }
+        .cart-icon { background: #ffb74d; padding: 0.5rem 1rem; border-radius: 40px; cursor: pointer; font-weight: bold; display: flex; gap: 8px; align-items: center; transition: 0.2s; }
+        .cart-icon:hover { background: #ffa726; transform: scale(1.02); }
+        .admin-link { background: #ffd966; padding: 0.3rem 0.9rem; border-radius: 30px; text-decoration: none; color: #2d3e2b; font-weight: bold; }
         
-        const writer = fs.createWriteStream(filePath);
-        response.data.pipe(writer);
+        .container { max-width: 1300px; margin: 2rem auto; padding: 0 1.5rem; }
         
-        return new Promise((resolve, reject) => {
-            writer.on('finish', () => resolve(localPath));
-            writer.on('error', reject);
-        });
-    } catch (error) {
-        console.log('Failed to save image locally:', error.message);
-        return imageUrl;
-    }
-}
-
-// ==================== SIMPLE PLACEHOLDER GENERATOR (NO CANVAS NEEDED) ====================
-async function generatePlaceholderImage(productName) {
-    const safeName = productName.toLowerCase().replace(/[^a-z0-9]/g, '_');
-    const filename = `${Date.now()}_${safeName}.jpg`;
-    const localPath = `/product_images/${filename}`;
-    
-    // Use placehold.co (free, no API key, no rate limits)
-    const placeholderUrl = `https://placehold.co/400x300/2e7d32/white?text=${encodeURIComponent(productName)}`;
-    
-    try {
-        const response = await axios({
-            method: 'GET',
-            url: placeholderUrl,
-            responseType: 'stream',
-            timeout: 10000
-        });
+        .products-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1.8rem; margin-top: 1rem; }
+        .product-card { background: white; border-radius: 24px; overflow: hidden; box-shadow: 0 8px 20px rgba(0,0,0,0.05); transition: 0.2s; padding: 1rem; text-align: center; border: 1px solid #e9f0e6; position: relative; }
+        .product-card:hover { transform: translateY(-5px); box-shadow: 0 15px 30px rgba(0,0,0,0.1); }
+        .product-img { width: 100%; height: 150px; object-fit: cover; border-radius: 18px; background: #eef2e6; }
+        .product-name { font-size: 1.4rem; font-weight: 700; margin: 0.7rem 0 0.3rem; }
+        .product-price { font-size: 1.3rem; color: #2e7d32; font-weight: bold; }
+        .product-category { font-size: 12px; color: #666; background: #f0f0f0; padding: 2px 8px; border-radius: 20px; display: inline-block; margin: 5px 0; }
+        .stock-badge { font-size: 0.75rem; background: #f1f8e9; display: inline-block; padding: 0.2rem 0.8rem; border-radius: 30px; margin: 0.5rem 0; }
+        .add-btn { background: #2e7d32; color: white; border: none; padding: 0.6rem 1.2rem; border-radius: 40px; font-weight: bold; cursor: pointer; margin-top: 0.6rem; transition: 0.2s; width: 100%; }
+        .add-btn:disabled { background: #aaa; cursor: not-allowed; }
+        .add-btn:hover:not(:disabled) { background: #1b5e20; }
+        .add-btn.in-cart { background: #ff9800; }
+        .added-to-cart-badge { position: absolute; top: 10px; right: 10px; background: #ff9800; color: white; padding: 4px 8px; border-radius: 20px; font-size: 10px; font-weight: bold; }
+        .weight-select { width: 100%; padding: 8px; margin: 8px 0; border-radius: 20px; border: 1px solid #ccc; background: white; cursor: pointer; }
         
-        const filePath = path.join(__dirname, 'public', localPath);
-        const writer = fs.createWriteStream(filePath);
-        response.data.pipe(writer);
+        .cart-sidebar { position: fixed; top: 0; right: -400px; width: 380px; height: 100%; background: white; box-shadow: -5px 0 20px rgba(0,0,0,0.2); z-index: 1000; transition: 0.3s; padding: 1.5rem; overflow-y: auto; display: flex; flex-direction: column; }
+        .cart-sidebar.open { right: 0; }
+        .cart-header { display: flex; justify-content: space-between; font-size: 1.5rem; font-weight: bold; border-bottom: 2px solid #e0e0e0; padding-bottom: 0.8rem; }
+        .close-cart { cursor: pointer; font-size: 1.8rem; }
+        .cart-items { flex: 1; margin: 1rem 0; }
+        .cart-item { display: flex; justify-content: space-between; margin-bottom: 1rem; border-bottom: 1px dashed #ddd; padding-bottom: 0.6rem; }
+        .cart-total { font-size: 1.3rem; font-weight: bold; border-top: 2px solid #ccc; padding-top: 0.8rem; text-align: right; }
+        .checkout-btn { background: #ff9800; width: 100%; padding: 0.8rem; border: none; border-radius: 50px; font-weight: bold; font-size: 1rem; margin-top: 1rem; cursor: pointer; }
         
-        await new Promise((resolve, reject) => {
-            writer.on('finish', resolve);
-            writer.on('error', reject);
-        });
+        .order-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; width: 90%; max-width: 500px; z-index: 1100; border-radius: 28px; padding: 1.8rem; display: none; box-shadow: 0 20px 35px rgba(0,0,0,0.2); }
+        .order-modal.open { display: block; }
+        .order-modal input, .order-modal textarea, .order-modal select { width: 100%; padding: 0.7rem; margin: 0.5rem 0; border: 1px solid #ccc; border-radius: 20px; }
+        .qr-area { text-align: center; margin: 1rem 0; }
+        .payment-note { background: #e8f5e9; padding: 12px; border-radius: 16px; text-align: center; margin: 15px 0; font-size: 14px; border-left: 4px solid #4caf50; }
         
-        return localPath;
-    } catch (error) {
-        console.log('Placeholder download failed, using URL:', error.message);
-        return placeholderUrl;
-    }
-}
-
-// ==================== AUTOMATIC IMAGE SEARCH ====================
-const PIXABAY_API_KEY = process.env.PIXABAY_API_KEY || '55691830-fab6eda5df88dbd0ea5299345';
-
-app.get('/api/search-image/:query', async (req, res) => {
-    const query = req.params.query;
-    try {
-        if (PIXABAY_API_KEY) {
-            const response = await axios.get('https://pixabay.com/api/', {
-                params: {
-                    key: PIXABAY_API_KEY,
-                    q: query,
-                    image_type: 'photo',
-                    per_page: 3,
-                    safesearch: true
-                }
-            });
-            
-            if (response.data && response.data.hits && response.data.hits.length > 0) {
-                let imageUrl = response.data.hits[0].webformatURL;
-                const localImagePath = await saveImageLocally(imageUrl, query);
-                
-                res.json({
-                    success: true,
-                    imageUrl: localImagePath,
-                    photographer: response.data.hits[0].user,
-                    source: 'Pixabay (saved locally)'
-                });
-                return;
-            }
+        .overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 999; display: none; }
+        .overlay.active { display: block; }
+        
+        .order-tracking { margin: 20px 0; padding: 15px; background: #f5f5f5; border-radius: 16px; }
+        .order-tracking input { width: 250px; display: inline-block; margin-right: 10px; }
+        .track-result-card { background: #e8f5e9; padding: 15px; border-radius: 12px; margin-bottom: 10px; }
+        .status-badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; }
+        .status-pending { background: #fff3cd; color: #856404; }
+        .status-confirmed { background: #cce5ff; color: #004085; }
+        .status-dispatched { background: #d4edda; color: #155724; }
+        .status-delivered { background: #d1ecf1; color: #0c5460; }
+        .delivery-info, .shop-location, .bulk-order-note { margin: 15px 0; }
+        .whatsapp-float { position: fixed; bottom: 20px; right: 20px; background-color: #25D366; color: white; border-radius: 50px; padding: 12px 20px; text-decoration: none; font-weight: bold; box-shadow: 2px 2px 5px rgba(0,0,0,0.3); z-index: 1000; display: flex; align-items: center; gap: 8px; }
+        footer { text-align: center; margin-top: 3rem; padding: 1.5rem; background: #eaf7e1; }
+        
+        @media (max-width: 700px) {
+            .cart-sidebar { width: 100%; right: -100%; }
+            .order-tracking input { width: 100%; margin-bottom: 10px; }
         }
-        res.json({ success: false, message: 'No image found' });
-    } catch (error) {
-        console.error('Image search error:', error.message);
-        res.json({ success: false, message: 'API error: ' + error.message });
-    }
-});
+    </style>
+</head>
+<body>
 
-// ==================== DATABASE SETUP ====================
-const db = new Database('./vegetable_shop.db');
+<div class="navbar">
+    <div class="logo">
+        <h2>🥬 Dad's Veggie Shop</h2>
+        <p>Farm fresh • Chemical free</p>
+    </div>
+    <div style="display: flex; gap: 15px; align-items: center;">
+        <a href="/admin-page" class="admin-link" target="_blank">📦 Admin Panel</a>
+        <div class="cart-icon" id="cartIcon">
+            🛒 Cart (<span id="cartCount">0</span>)
+        </div>
+    </div>
+</div>
 
-db.exec(`
-    CREATE TABLE IF NOT EXISTS products (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        description TEXT,
-        price REAL NOT NULL,
-        stock INTEGER NOT NULL DEFAULT 0,
-        image_url TEXT,
-        category TEXT
-    );
-    CREATE TABLE IF NOT EXISTS orders (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        customer_name TEXT NOT NULL,
-        customer_phone TEXT NOT NULL,
-        customer_address TEXT NOT NULL,
-        total_amount REAL NOT NULL,
-        payment_status TEXT DEFAULT 'pending',
-        order_status TEXT DEFAULT 'pending',
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE TABLE IF NOT EXISTS order_items (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        order_id INTEGER,
-        product_id INTEGER,
-        quantity INTEGER,
-        price REAL,
-        weight TEXT,
-        FOREIGN KEY(order_id) REFERENCES orders(id),
-        FOREIGN KEY(product_id) REFERENCES products(id)
-    );
-`);
-
-try { db.exec(`ALTER TABLE products ADD COLUMN unit TEXT DEFAULT 'kg';`); } catch (e) {}
-try { db.exec(`ALTER TABLE products ADD COLUMN weight_options TEXT DEFAULT '1kg';`); } catch (e) {}
-try { db.exec(`ALTER TABLE orders ADD COLUMN delivery_slot TEXT;`); } catch (e) {}
-try { db.exec(`ALTER TABLE order_items ADD COLUMN weight TEXT;`); } catch (e) {}
-
-const productCount = db.prepare('SELECT COUNT(*) as count FROM products').get();
-const orderCount = db.prepare('SELECT COUNT(*) as count FROM orders').get();
-
-if (productCount.count === 0 && orderCount.count === 0) {
-    console.log('📦 Fresh database detected. Inserting sample products...');
-    const veggies = [
-        ['Tomato', 'Fresh red tomatoes', 40, 100, '/product_images/tomato_sample.jpg', 'Vegetables', 'kg', '250g,500g,1kg'],
-        ['Potato', 'Farm potatoes', 30, 100, '/product_images/potato_sample.jpg', 'Vegetables', 'kg', '250g,500g,1kg'],
-        ['Onion', 'Red onion', 35, 100, '/product_images/onion_sample.jpg', 'Vegetables', 'kg', '250g,500g,1kg'],
-        ['Carrot', 'Organic carrots', 45, 100, '/product_images/carrot_sample.jpg', 'Vegetables', 'kg', '250g,500g,1kg'],
-        ['Spinach', 'Fresh spinach bunch', 25, 100, '/product_images/spinach_sample.jpg', 'Vegetables', 'bunch', '1,2,3,4,5,6,7,8,9,10,11,12,13,14,15'],
-        ['Cucumber', 'Crisp cucumber', 35, 100, '/product_images/cucumber_sample.jpg', 'Vegetables', 'piece', '1,2,3,4,5,6,7,8,9,10,11,12,13,14,15']
-    ];
-    const insert = db.prepare(`INSERT INTO products (name, description, price, stock, image_url, category, unit, weight_options) VALUES (?,?,?,?,?,?,?,?)`);
-    for (const v of veggies) insert.run(v);
-    console.log('✅ Sample products inserted.');
-} else {
-    console.log(`📊 Existing database found: ${productCount.count} products, ${orderCount.count} orders.`);
-}
-
-function isAdmin(req, res, next) {
-    if (req.session && req.session.admin) return next();
-    else return res.status(401).json({ error: 'Unauthorized' });
-}
-
-// ==================== CUSTOMER API ENDPOINTS ====================
-app.get('/api/products', (req, res) => {
-    const rows = db.prepare(`SELECT id, name, price, stock, image_url, category, unit, weight_options FROM products`).all();
-    res.json({ products: rows });
-});
-
-app.post('/api/orders', async (req, res) => {
-    const { customerName, customerPhone, customerAddress, items, deliverySlot, totalAmount } = req.body;
-    if (!items || items.length === 0) return res.status(400).json({ error: 'No items' });
+<div class="container">
+    <div class="delivery-info" style="font-size:14px; background:#e8f5e9; padding:10px; border-radius:16px;">
+        📦 Free delivery above ₹100 | Flat ₹30 below ₹100
+    </div>
+    <div class="bulk-order-note" style="background:#fff3cd; padding:10px; border-radius:8px; margin:10px 0; text-align:center;">
+        🍽️ <strong>We take bulk orders for Caterers/Restaurants</strong> — Contact us for wholesale pricing!
+    </div>
     
-    for (let item of items) {
-        const prod = db.prepare(`SELECT stock FROM products WHERE id = ?`).get(item.productId);
-        if (!prod || prod.stock < item.quantity) {
-            return res.status(400).json({ error: `Insufficient stock for product ID ${item.productId}` });
-        }
-    }
+    <div class="order-tracking">
+        <h3>🔍 Track Your Orders</h3>
+        <input type="tel" id="trackPhone" placeholder="Enter 10-digit Mobile Number" maxlength="10">
+        <button onclick="trackOrders()" style="background:#2e7d32; color:white; padding:8px 20px; border-radius:40px;">Track Orders</button>
+        <div id="trackResult" style="margin-top:15px;"></div>
+    </div>
     
-    const total = totalAmount || items.reduce((s, i) => s + i.price * i.quantity, 0);
-    const insertOrder = db.prepare(`INSERT INTO orders (customer_name, customer_phone, customer_address, total_amount, delivery_slot) VALUES (?,?,?,?,?)`);
-    const result = insertOrder.run(customerName, customerPhone, customerAddress, total, deliverySlot || null);
-    const orderId = result.lastInsertRowid;
+    <div class="category-filters" style="margin:20px 0; text-align:center; display:flex; flex-wrap:wrap; gap:10px; justify-content:center;">
+        <button onclick="filterProducts('all')" style="background:#e0e0e0; border:none; padding:8px 16px; border-radius:30px; cursor:pointer;">All</button>
+        <button onclick="filterProducts('Vegetables')" style="background:#e0e0e0; border:none; padding:8px 16px; border-radius:30px; cursor:pointer;">🥬 Fresh Produce</button>
+        <button onclick="filterProducts('Masala Powders')" style="background:#e0e0e0; border:none; padding:8px 16px; border-radius:30px; cursor:pointer;">🌶️ Masala Powders</button>
+        <button onclick="filterProducts('South Indian')" style="background:#e0e0e0; border:none; padding:8px 16px; border-radius:30px; cursor:pointer;">🍛 South Indian</button>
+        <button onclick="filterProducts('Dry Groceries')" style="background:#e0e0e0; border:none; padding:8px 16px; border-radius:30px; cursor:pointer;">🍚 Dry Groceries</button>
+    </div>
     
-    const insertItem = db.prepare(`INSERT INTO order_items (order_id, product_id, quantity, price, weight) VALUES (?,?,?,?,?)`);
-    for (let it of items) {
-        insertItem.run(orderId, it.productId, it.quantity, it.price, it.weight || null);
-    }
-    
-    await addToGoogleSheets({
-        orderId, name: customerName, phone: customerPhone, address: customerAddress,
-        total, slot: deliverySlot, date: new Date().toISOString()
-    });
-    
-    const adminPhone = "919029186608";
-    await sendWhatsAppMessage(adminPhone, `🆕 New Order #${orderId}\nCustomer: ${customerName}\nPhone: ${customerPhone}\nTotal: ₹${total}\nSlot: ${deliverySlot || 'Not selected'}`);
-    await sendTelegramAlert(`🆕 <b>NEW ORDER #${orderId}</b>\n\nCustomer: ${customerName}\nPhone: ${customerPhone}\nTotal: ₹${total}\nSlot: ${deliverySlot || 'Not selected'}`);
-    
-    const UPI_ID = "9029186608@okbizaxis";
-    const upiUrl = `upi://pay?pa=${UPI_ID}&pn=Dad%20Veg%20Shop&am=${total}&cu=INR&tn=Order%20${orderId}`;
-    QRCode.toDataURL(upiUrl, (err, qrDataUrl) => {
-        if (err) return res.json({ orderId, totalAmount: total, qrCodeDataURL: null, upiIntentUrl: upiUrl, customerPhone });
-        res.json({ orderId, totalAmount: total, qrCodeDataURL: qrDataUrl, upiIntentUrl: upiUrl, customerPhone });
-    });
-});
+    <div id="productsContainer" class="products-grid">Loading vegetables...</div>
+</div>
 
-app.get('/api/orders/:phone', (req, res) => {
-    const orders = db.prepare(`SELECT id, order_status, payment_status, total_amount, delivery_slot, created_at FROM orders WHERE customer_phone = ? ORDER BY id DESC`).all(req.params.phone);
-    if (!orders || orders.length === 0) return res.status(404).json({ error: 'No orders found for this number' });
-    res.json(orders);
-});
+<div class="cart-sidebar" id="cartSidebar">
+    <div class="cart-header">
+        <span>Your Cart</span>
+        <span class="close-cart" id="closeCartBtn">&times;</span>
+    </div>
+    <div id="cartItemsList" class="cart-items">Cart is empty</div>
+    <div class="cart-total">Subtotal: ₹<span id="cartSubtotal">0</span></div>
+    <div class="delivery-charge" style="text-align:right;">Delivery: ₹<span id="deliveryCharge">0</span></div>
+    <div class="cart-total">Total: ₹<span id="cartTotalAmount">0</span></div>
+    <button class="checkout-btn" id="checkoutBtn">🛍️ Proceed to Checkout</button>
+</div>
 
-// ==================== ADMIN API ENDPOINTS ====================
-app.post('/admin/login', (req, res) => {
-    const { password } = req.body;
-    if (password === ADMIN_PASSWORD) {
-        req.session.admin = true;
-        return res.json({ success: true });
-    }
-    res.status(401).json({ error: 'Wrong password' });
-});
+<div class="overlay" id="overlay"></div>
 
-app.get('/admin/logout', (req, res) => { req.session.destroy(); res.json({ success: true }); });
+<div class="order-modal" id="orderModal">
+    <h3>📝 Delivery Details</h3>
+    <input type="text" id="customerName" placeholder="Full Name" required>
+    <input type="tel" id="customerPhone" placeholder="10-digit Mobile Number" maxlength="10" required>
+    <textarea id="customerAddress" rows="2" placeholder="Delivery Address"></textarea>
+    <div class="delivery-slots">
+        <label>📅 Delivery Slots:</label>
+        <select id="deliverySlot">
+            <option value="">Select a slot</option>
+            <option value="Morning (8-10 AM)">Morning (8-10 AM)</option>
+            <option value="Evening (8-10 PM)">Evening (8-10 PM)</option>
+        </select>
+    </div>
+    
+    <div id="qrPaymentSection" style="display: none;">
+        <div class="qr-area">
+            <img id="qrCodeImg" style="width: 180px; height: 180px; border-radius: 20px;">
+            <p style="margin-top:10px;">or</p>
+            <button id="payWithAppBtn" style="background:#2e7d32; color:white; padding:10px; border-radius:40px; width:100%;">📱 Pay with UPI App</button>
+        </div>
+        <p style="text-align:center;">Scan QR or click above to pay.<br>Order ID: <strong id="orderIdSpan"></strong><br>Amount: ₹<span id="orderAmountSpan"></span></p>
+        <div class="payment-note">
+            💡 <strong>Once payment is done, close this window.</strong><br>
+            Your order will be placed automatically!
+        </div>
+        <button id="closeModalBtn" style="background:#4caf50; padding:0.8rem; width:100%; border:none; border-radius:40px; color:white; font-weight:bold; cursor:pointer;">✓ I have completed payment - Close</button>
+    </div>
+    
+    <div id="checkoutFormSection">
+        <button id="placeOrderBtn" class="checkout-btn">Place Order & Get QR</button>
+    </div>
+</div>
 
-app.get('/api/admin/products', isAdmin, (req, res) => {
-    const rows = db.prepare(`SELECT * FROM products`).all();
-    res.json(rows);
-});
+<div class="shop-location" style="text-align:center; margin:20px 0;">
+    📍 Our Shop: <a href="https://share.google/eUozOVKELli8hQiJ8" target="_blank">View on Map</a>
+</div>
 
-app.post('/api/admin/products', isAdmin, async (req, res) => {
-    const { name, description, price, stock, image_url, category, unit, weight_options } = req.body;
-    
-    let finalImageUrl = image_url || '';
-    if (finalImageUrl && (finalImageUrl.includes('pixabay') || finalImageUrl.includes('unsplash') || finalImageUrl.includes('imgur'))) {
-        finalImageUrl = await saveImageLocally(finalImageUrl, name);
-    }
-    
-    const insert = db.prepare(`INSERT INTO products (name, description, price, stock, image_url, category, unit, weight_options) VALUES (?,?,?,?,?,?,?,?)`);
-    const result = insert.run(name, description, price, stock, finalImageUrl, category, unit || 'kg', weight_options || '250g,500g,1kg');
-    res.json({ id: result.lastInsertRowid });
-});
+<footer>
+    🧾 Fresh vegetables delivered | UPI QR payment | Dad's Shop since 1995
+</footer>
 
-app.put('/api/admin/products/:id', isAdmin, async (req, res) => {
-    const { name, description, price, stock, image_url, category, unit, weight_options } = req.body;
-    
-    let finalImageUrl = image_url || '';
-    if (finalImageUrl && (finalImageUrl.includes('pixabay') || finalImageUrl.includes('unsplash') || finalImageUrl.includes('imgur'))) {
-        finalImageUrl = await saveImageLocally(finalImageUrl, name);
-    }
-    
-    const update = db.prepare(`UPDATE products SET name=?, description=?, price=?, stock=?, image_url=?, category=?, unit=?, weight_options=? WHERE id=?`);
-    update.run(name, description, price, stock, finalImageUrl, category, unit || 'kg', weight_options || '250g,500g,1kg', req.params.id);
-    res.json({ updated: true });
-});
+<a href="https://wa.me/919029186608?text=Hi%2C%20I%20want%20to%20place%20an%20order" class="whatsapp-float" target="_blank">💬 WhatsApp us</a>
 
-app.delete('/api/admin/products/:id', isAdmin, (req, res) => {
-    const del = db.prepare(`DELETE FROM products WHERE id=?`);
-    del.run(req.params.id);
-    res.json({ deleted: true });
-});
+<script>
+    let allProducts = [];
+    let cart = [];
+    let currentFilter = 'all';
+    let currentUpiIntentUrl = '';
+    let backPressCount = 0;
+    let backPressTimer = null;
 
-app.get('/api/admin/orders', isAdmin, (req, res) => {
-    const orders = db.prepare(`SELECT * FROM orders ORDER BY id DESC`).all();
-    for (let order of orders) {
-        const items = db.prepare(`SELECT product_id, quantity, price, weight FROM order_items WHERE order_id = ?`).all(order.id);
-        order.items = items;
-    }
-    res.json(orders);
-});
+    const productsContainer = document.getElementById('productsContainer');
+    const cartSidebar = document.getElementById('cartSidebar');
+    const overlay = document.getElementById('overlay');
+    const orderModal = document.getElementById('orderModal');
 
-app.put('/api/admin/orders/:id/pay', isAdmin, async (req, res) => {
-    const orderId = req.params.id;
-    const order = db.prepare(`SELECT payment_status, customer_name, customer_phone, total_amount FROM orders WHERE id = ?`).get(orderId);
-    if (!order) return res.status(404).json({ error: 'Order not found' });
-    if (order.payment_status === 'paid') return res.json({ message: 'Already paid' });
-    
-    const items = db.prepare(`SELECT product_id, quantity FROM order_items WHERE order_id = ?`).all(orderId);
-    for (let it of items) {
-        const prod = db.prepare(`SELECT stock FROM products WHERE id = ?`).get(it.product_id);
-        if (prod.stock < it.quantity) return res.status(400).json({ error: 'Stock insufficient' });
-        db.prepare(`UPDATE products SET stock = stock - ? WHERE id = ?`).run(it.quantity, it.product_id);
-    }
-    db.prepare(`UPDATE orders SET payment_status = 'paid', order_status = 'confirmed' WHERE id = ?`).run(orderId);
-    
-    await sendWhatsAppMessage(order.customer_phone, `✅ Order #${orderId} CONFIRMED!\nAmount: ₹${order.total_amount}\nYour order will be prepared and dispatched soon. - Dad's Veggie Shop`);
-    await sendTelegramAlert(`✅ <b>PAYMENT CONFIRMED</b>\nOrder #${orderId}\nCustomer: ${order.customer_name}\nAmount: ₹${order.total_amount}`);
-    
-    res.json({ success: true });
-});
-
-app.put('/api/admin/orders/:id/dispatch', isAdmin, async (req, res) => {
-    const order = db.prepare(`SELECT customer_name, customer_phone, total_amount FROM orders WHERE id = ?`).get(req.params.id);
-    db.prepare(`UPDATE orders SET order_status = 'dispatched' WHERE id = ?`).run(req.params.id);
-    
-    await sendWhatsAppMessage(order.customer_phone, `🚚 Order #${req.params.id} DISPATCHED!\nYour order is on the way! - Dad's Veggie Shop`);
-    await sendTelegramAlert(`🚚 <b>ORDER DISPATCHED</b>\nOrder #${req.params.id}\nCustomer: ${order.customer_name}\nAmount: ₹${order.total_amount}`);
-    
-    res.json({ success: true });
-});
-
-app.put('/api/admin/orders/:id/deliver', isAdmin, async (req, res) => {
-    const order = db.prepare(`SELECT customer_name, customer_phone, total_amount FROM orders WHERE id = ?`).get(req.params.id);
-    db.prepare(`UPDATE orders SET order_status = 'delivered' WHERE id = ?`).run(req.params.id);
-    
-    await sendWhatsAppMessage(order.customer_phone, `🎉 Order #${req.params.id} DELIVERED!\nThank you for shopping with Dad's Veggie Shop! 🥬`);
-    await sendTelegramAlert(`🎉 <b>ORDER DELIVERED</b>\nOrder #${req.params.id}\nCustomer: ${order.customer_name}\nAmount: ₹${order.total_amount}`);
-    
-    res.json({ success: true });
-});
-
-// ==================== IMAGE FETCH ENDPOINTS WITH PLACEHOLDER FALLBACK ====================
-app.post('/api/admin/fetch-single-image/:id', isAdmin, async (req, res) => {
-    try {
-        const productId = req.params.id;
-        const product = db.prepare(`SELECT id, name FROM products WHERE id = ?`).get(productId);
-        
-        if (!product) {
-            return res.status(404).json({ success: false, error: 'Product not found' });
-        }
-        
-        let success = false;
-        let message = '';
-        let imageUrl = '';
-        
-        // Try Pixabay first
-        try {
-            const response = await axios.get('https://pixabay.com/api/', {
-                params: {
-                    key: PIXABAY_API_KEY,
-                    q: product.name,
-                    image_type: 'photo',
-                    per_page: 1,
-                    safesearch: true
-                },
-                timeout: 10000
-            });
-            
-            if (response.data && response.data.hits && response.data.hits.length > 0) {
-                imageUrl = response.data.hits[0].webformatURL;
-                const localPath = await saveImageLocally(imageUrl, product.name);
-                db.prepare(`UPDATE products SET image_url = ? WHERE id = ?`).run(localPath, productId);
-                success = true;
-                message = `Image fetched from Pixabay for ${product.name}`;
-                console.log(`✅ ${message}`);
-            }
-        } catch (pixabayError) {
-            console.log(`Pixabay failed for ${product.name}: ${pixabayError.message}`);
-        }
-        
-        // If Pixabay failed, use placeholder
-        if (!success) {
-            try {
-                const localPath = await generatePlaceholderImage(product.name);
-                db.prepare(`UPDATE products SET image_url = ? WHERE id = ?`).run(localPath, productId);
-                success = true;
-                message = `Placeholder generated for ${product.name}`;
-                console.log(`✅ ${message}`);
-                imageUrl = localPath;
-            } catch (placeholderError) {
-                message = `Failed to generate placeholder for ${product.name}`;
-                console.log(`❌ ${message}`);
-            }
-        }
-        
-        if (success) {
-            res.json({ success: true, message: message, imageUrl: imageUrl });
+    window.addEventListener('popstate', function() {
+        if (cartSidebar.classList.contains('open')) {
+            cartSidebar.classList.remove('open');
+            overlay.classList.remove('active');
+            history.pushState(null, null, window.location.href);
+        } else if (orderModal.classList.contains('open')) {
+            orderModal.classList.remove('open');
+            overlay.classList.remove('active');
+            history.pushState(null, null, window.location.href);
         } else {
-            res.json({ success: false, message: message });
+            if (backPressCount === 0) {
+                backPressCount++;
+                if (confirm('Do you want to exit the app?')) {
+                    window.close();
+                    history.back();
+                } else {
+                    backPressCount = 0;
+                    history.pushState(null, null, window.location.href);
+                }
+                backPressTimer = setTimeout(() => { backPressCount = 0; }, 2000);
+            } else {
+                window.close();
+                history.back();
+            }
         }
-    } catch (error) {
-        console.error('Single fetch error:', error.message);
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
+    });
+    history.pushState(null, null, window.location.href);
 
-app.post('/api/admin/bulk-fetch-images', isAdmin, async (req, res) => {
-    try {
-        const products = db.prepare(`
-            SELECT id, name, image_url 
-            FROM products 
-            WHERE image_url IS NULL 
-               OR image_url = '' 
-               OR image_url LIKE '%placeholder%'
-               OR image_url NOT LIKE '/product_images/%'
-        `).all();
-        
-        console.log(`Found ${products.length} products needing images`);
-        
-        if (products.length === 0) {
-            return res.json({
-                success: true,
-                message: 'No products need images!',
-                total: 0,
-                updated: 0,
-                failed: 0,
-                results: []
+    function validatePhone(phone) { return /^\d{10}$/.test(phone); }
+    function calculateDelivery(totalAmount) { return totalAmount >= 100 ? 0 : 30; }
+
+    async function loadProducts() {
+        try {
+            const res = await fetch('/api/products?_=' + Date.now(), {
+                cache: 'no-store',
+                headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
             });
+            const data = await res.json();
+            allProducts = data.products;
+            renderProducts(allProducts);
+        } catch (err) {
+            productsContainer.innerHTML = '<p>Error loading veggies. Please refresh.</p>';
+        }
+    }
+
+    function getCartQuantity(productId) {
+        const item = cart.find(item => item.productId === productId);
+        return item ? item.quantity : 0;
+    }
+
+    function renderProducts(productsToRender) {
+        if (!productsToRender.length) {
+            productsContainer.innerHTML = '<p>No vegetables available currently. Check back later!</p>';
+            return;
         }
         
-        let updated = 0;
-        let failed = 0;
-        const results = [];
+        const cacheBuster = Date.now();
         
-        for (const product of products) {
-            let productSuccess = false;
+        productsContainer.innerHTML = productsToRender.map(p => {
+            const inCartQty = getCartQuantity(p.id);
+            const inCart = inCartQty > 0;
+            const unitDisplay = p.unit || 'kg';
             
-            // Try Pixabay first
-            try {
-                const response = await axios.get('https://pixabay.com/api/', {
-                    params: {
-                        key: PIXABAY_API_KEY,
-                        q: product.name,
-                        image_type: 'photo',
-                        per_page: 1,
-                        safesearch: true
-                    },
-                    timeout: 10000
-                });
+            let weightHtml = '';
+            if (unitDisplay === 'kg') {
+                weightHtml = `<select class="weight-select" data-id="${p.id}" data-price="${p.price}" data-unit="kg">
+                    <option value="" disabled selected>-- Select Weight --</option>
+                    <option value="250g">250g - ₹${(p.price * 0.25).toFixed(2)}</option>
+                    <option value="500g">500g - ₹${(p.price * 0.5).toFixed(2)}</option>
+                    <option value="1kg">1kg - ₹${p.price}</option>
+                </select>`;
+            } else if (unitDisplay === 'piece' || unitDisplay === 'bunch' || unitDisplay === 'packet') {
+                let options = '<option value="" disabled selected>-- Select Quantity --</option>';
+                for (let i = 1; i <= 15; i++) {
+                    options += `<option value="${i}">${i} ${unitDisplay}${i > 1 ? 's' : ''} - ₹${(p.price * i).toFixed(2)}</option>`;
+                }
+                weightHtml = `<select class="weight-select" data-id="${p.id}" data-price="${p.price}" data-unit="${unitDisplay}">
+                    ${options}
+                </select>`;
+            }
+            
+            // Use the image URL from database or fallback to Pixabay tomato
+            const imageUrl = p.image_url ? `${p.image_url}?t=${cacheBuster}` : 'https://cdn.pixabay.com/photo/2020/06/01/13/55/tomatoes-5247827_640.jpg';
+            
+            return `
+                <div class="product-card">
+                    ${inCart ? '<div class="added-to-cart-badge">✓ Added to Cart</div>' : ''}
+                    <img class="product-img" src="${imageUrl}" alt="${p.name}">
+                    <div class="product-name">${p.name}</div>
+                    <div class="product-price">₹${p.price}/${unitDisplay}</div>
+                    <div class="product-category">${p.category || 'Vegetables'}</div>
+                    <div class="stock-badge">${p.stock > 0 ? `In stock: ${p.stock} ${unitDisplay}` : 'Out of stock'}</div>
+                    ${weightHtml}
+                    <button class="add-btn ${inCart ? 'in-cart' : ''}" data-id="${p.id}" data-name="${p.name}" data-price="${p.price}" data-unit="${unitDisplay}" data-stock="${p.stock}">
+                        ${inCart ? `✓ Added (${inCartQty})` : 'Add to Cart'}
+                    </button>
+                </div>
+            `;
+        }).join('');
+
+        document.querySelectorAll('.add-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const id = parseInt(btn.dataset.id);
+                const name = btn.dataset.name;
+                const basePrice = parseFloat(btn.dataset.price);
+                const unit = btn.dataset.unit;
+                const stock = parseInt(btn.dataset.stock);
+                const weightSelect = document.querySelector(`.weight-select[data-id="${id}"]`);
+                const selectedWeight = weightSelect ? weightSelect.value : null;
                 
-                if (response.data && response.data.hits && response.data.hits.length > 0) {
-                    const imageUrl = response.data.hits[0].webformatURL;
-                    const localPath = await saveImageLocally(imageUrl, product.name);
-                    db.prepare(`UPDATE products SET image_url = ? WHERE id = ?`).run(localPath, product.id);
-                    updated++;
-                    results.push({
-                        id: product.id,
-                        name: product.name,
-                        status: 'success',
-                        source: 'Pixabay'
-                    });
-                    console.log(`✅ Fetched Pixabay image for ${product.name}`);
-                    productSuccess = true;
+                if (!selectedWeight || selectedWeight === '') {
+                    alert('Please select weight/quantity first');
+                    return;
                 }
-            } catch (pixabayError) {
-                console.log(`Pixabay failed for ${product.name}: ${pixabayError.message}`);
-            }
-            
-            // If Pixabay failed, use placeholder
-            if (!productSuccess) {
-                try {
-                    const localPath = await generatePlaceholderImage(product.name);
-                    db.prepare(`UPDATE products SET image_url = ? WHERE id = ?`).run(localPath, product.id);
-                    updated++;
-                    results.push({
-                        id: product.id,
-                        name: product.name,
-                        status: 'success',
-                        source: 'Placeholder'
-                    });
-                    console.log(`✅ Generated placeholder for ${product.name}`);
-                    productSuccess = true;
-                } catch (placeholderError) {
-                    failed++;
-                    results.push({
-                        id: product.id,
-                        name: product.name,
-                        status: 'failed',
-                        reason: placeholderError.message
-                    });
-                    console.log(`❌ Failed for ${product.name}: ${placeholderError.message}`);
+                
+                let price = basePrice;
+                if (unit === 'kg') {
+                    if (selectedWeight === '250g') price = basePrice * 0.25;
+                    else if (selectedWeight === '500g') price = basePrice * 0.5;
+                    else price = basePrice;
+                } else {
+                    const qty = parseInt(selectedWeight);
+                    price = basePrice * qty;
                 }
-            }
-            
-            await new Promise(resolve => setTimeout(resolve, 300));
-        }
-        
-        res.json({
-            success: true,
-            message: `Completed: ${updated} images/placeholders generated, ${failed} failed`,
-            total: products.length,
-            updated: updated,
-            failed: failed,
-            results: results
+                
+                const existing = cart.find(item => item.productId === id && item.weight === selectedWeight);
+                const currentQty = existing ? existing.quantity : 0;
+                if (currentQty + 1 > stock) {
+                    alert(`Only ${stock} ${unit} available!`);
+                    return;
+                }
+                
+                if (existing) {
+                    existing.quantity += 1;
+                } else {
+                    cart.push({ productId: id, name, price, quantity: 1, weight: selectedWeight, unit });
+                }
+                updateCartUI();
+                renderProducts(allProducts);
+            });
         });
-    } catch (error) {
-        console.error('Bulk fetch error:', error);
-        res.status(500).json({ success: false, error: error.message });
     }
-});
 
-// ==================== BULK PRODUCT UPLOAD ====================
-app.get('/api/admin/products/template', isAdmin, (req, res) => {
-    const templateHeaders = ['name', 'price', 'stock', 'unit', 'weight_options', 'category', 'image_url', 'description'];
-    let csvContent = templateHeaders.join(',') + '\n';
-    csvContent += 'Tomato,40,100,kg,"250g,500g,1kg",Vegetables,,Fresh red tomatoes\n';
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', 'attachment; filename="product_template.csv"');
-    res.send(csvContent);
-});
-
-const csvUpload = multer({ dest: 'uploads/' });
-app.post('/api/admin/products/bulk', isAdmin, csvUpload.single('csvFile'), async (req, res) => {
-    try {
-        if (!req.file) return res.status(400).json({ error: 'No CSV file uploaded' });
-        
-        const results = [];
-        await new Promise((resolve, reject) => {
-            fs.createReadStream(req.file.path)
-                .pipe(csv())
-                .on('data', (data) => results.push(data))
-                .on('end', resolve)
-                .on('error', reject);
+    function updateCartUI() {
+        const subtotal = cart.reduce((sum, i) => sum + (i.price * i.quantity), 0);
+        const delivery = calculateDelivery(subtotal);
+        const total = subtotal + delivery;
+        document.getElementById('cartCount').innerText = cart.reduce((sum, i) => sum + i.quantity, 0);
+        document.getElementById('cartSubtotal').innerText = subtotal.toFixed(2);
+        document.getElementById('deliveryCharge').innerText = delivery;
+        document.getElementById('cartTotalAmount').innerText = total.toFixed(2);
+        if (cart.length === 0) {
+            document.getElementById('cartItemsList').innerHTML = 'Cart is empty 🛒';
+            return;
+        }
+        document.getElementById('cartItemsList').innerHTML = cart.map((item, idx) => `
+            <div class="cart-item">
+                <span>${item.name} (${item.weight}) x${item.quantity}</span>
+                <span>₹${(item.price * item.quantity).toFixed(2)} 
+                    <button style="background:#e53935; border:none; color:white; border-radius:30px; padding:2px 10px; margin-left:8px; cursor:pointer;" data-idx="${idx}">Remove</button>
+                </span>
+            </div>
+        `).join('');
+        document.querySelectorAll('.cart-item button').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const idx = parseInt(btn.dataset.idx);
+                cart.splice(idx, 1);
+                updateCartUI();
+                renderProducts(allProducts);
+            });
         });
-        
-        const insertedProducts = [];
-        for (const row of results) {
-            if (!row.name || !row.price || !row.stock) continue;
-            
-            const insert = db.prepare(`INSERT INTO products (name, description, price, stock, image_url, category, unit, weight_options) VALUES (?,?,?,?,?,?,?,?)`);
-            const result = insert.run(
-                row.name.trim(),
-                row.description || '',
-                parseFloat(row.price),
-                parseInt(row.stock),
-                row.image_url || '',
-                row.category || 'Vegetables',
-                row.unit || 'kg',
-                row.weight_options || '250g,500g,1kg'
-            );
-            insertedProducts.push({ id: result.lastInsertRowid, name: row.name });
-        }
-        
-        fs.unlinkSync(req.file.path);
-        res.json({ success: true, message: `${insertedProducts.length} products added`, inserted: insertedProducts });
-    } catch (error) {
-        if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-        res.status(500).json({ error: 'Bulk upload failed: ' + error.message });
     }
-});
 
-// ==================== IMAGE UPLOAD ====================
-app.post('/api/upload-image', upload.single('image'), async (req, res) => {
-    try {
-        if (!req.file) return res.status(400).json({ success: false, error: 'No image file' });
-        const extension = req.file.originalname.split('.').pop();
-        const filename = `${Date.now()}_upload.${extension}`;
-        const localPath = `/product_images/${filename}`;
-        const filePath = path.join(__dirname, 'public', localPath);
-        fs.writeFileSync(filePath, req.file.buffer);
-        res.json({ success: true, url: localPath });
-    } catch (error) {
-        res.status(500).json({ success: false, error: 'Upload failed' });
-    }
-});
-
-// ==================== HEALTH & PAGE ROUTES ====================
-app.get('/healthz', (req, res) => {
-    res.status(200).send('OK');
-});
-
-process.on('SIGTERM', () => { db.close(); process.exit(0); });
-process.on('SIGINT', () => { db.close(); process.exit(0); });
-
-app.get('/admin-page', (req, res) => {
-    if (req.session && req.session.admin) {
-        res.sendFile(path.join(__dirname, 'public', 'admin.html'));
-    } else {
-        res.send(`<html><body style="font-family:sans-serif;text-align:center;margin-top:100px"><h2>Admin Login</h2><form id="loginForm"><input type="password" id="pwd" placeholder="Enter password" /><button type="submit">Login</button></form><script>document.getElementById('loginForm').onsubmit=async(e)=>{e.preventDefault();const pwd=document.getElementById('pwd').value;const r=await fetch('/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pwd})});if(r.ok) location.reload();else alert('Wrong password');};<\/script></body></html>`);
-    }
-});
-
-// Temporary endpoint to fix image URLs
-app.get('/api/fix-product-images', isAdmin, (req, res) => {
-    const products = db.prepare(`SELECT id, name FROM products`).all();
-    
-    for (const product of products) {
-        const name = product.name.toLowerCase();
-        let imageUrl = '';
-        
-        if (name === 'tomato') imageUrl = '/product_images/tomato_sample.jpg';
-        else if (name === 'potato') imageUrl = '/product_images/potato_sample.jpg';
-        else if (name === 'onion') imageUrl = '/product_images/onion_sample.jpg';
-        else if (name === 'carrot') imageUrl = '/product_images/carrot_sample.jpg';
-        else if (name === 'spinach') imageUrl = '/product_images/spinach_sample.jpg';
-        else if (name === 'cucumber') imageUrl = '/product_images/cucumber_sample.jpg';
-        
-        if (imageUrl) {
-            db.prepare(`UPDATE products SET image_url = ? WHERE id = ?`).run(imageUrl, product.id);
-            console.log(`✅ Updated ${product.name} -> ${imageUrl}`);
+    function filterProducts(category) {
+        currentFilter = category;
+        if (category === 'all') {
+            renderProducts(allProducts);
+        } else {
+            const filtered = allProducts.filter(p => p.category === category);
+            renderProducts(filtered);
         }
     }
-    
-    res.json({ success: true, message: 'Product images updated!' });
-});
+    window.filterProducts = filterProducts;
 
-// Set online images for all products (from Pixabay)
-app.get('/api/set-online-images', isAdmin, (req, res) => {
-    const images = {
-        1: 'https://cdn.pixabay.com/photo/2020/06/01/13/55/tomatoes-5247827_640.jpg',
-        2: 'https://cdn.pixabay.com/photo/2016/08/11/08/04/potatoes-1585075_640.jpg',
-        3: 'https://cdn.pixabay.com/photo/2020/07/15/20/38/onion-5409359_640.jpg',
-        4: 'https://cdn.pixabay.com/photo/2017/06/23/06/04/carrots-2433439_640.jpg',
-        5: 'https://cdn.pixabay.com/photo/2016/03/26/16/44/spinach-1280831_640.jpg',
-        6: 'https://cdn.pixabay.com/photo/2016/07/24/17/33/cucumber-1538652_640.jpg'
+    document.getElementById('cartIcon').onclick = () => {
+        cartSidebar.classList.add('open');
+        overlay.classList.add('active');
     };
-    
-    for (const [id, url] of Object.entries(images)) {
-        db.prepare(`UPDATE products SET image_url = ? WHERE id = ?`).run(url, id);
-        console.log(`✅ Updated product ${id} with online image`);
-    }
-    
-    res.json({ success: true, message: 'Online images set for all products!' });
-});
+    document.getElementById('closeCartBtn').onclick = () => {
+        cartSidebar.classList.remove('open');
+        overlay.classList.remove('active');
+    };
+    overlay.onclick = () => {
+        cartSidebar.classList.remove('open');
+        overlay.classList.remove('active');
+        orderModal.classList.remove('open');
+    };
 
-app.listen(PORT, HOST, () => {
-    console.log(`✅ Veggie Shop running on http://${HOST}:${PORT}`);
-    console.log(`👉 Admin panel: http://${HOST}:${PORT}/admin-page`);
-});
+    document.getElementById('checkoutBtn').onclick = () => {
+        if (cart.length === 0) {
+            alert('Your cart is empty! Add some veggies.');
+            return;
+        }
+        orderModal.classList.add('open');
+        overlay.classList.add('active');
+        document.getElementById('qrPaymentSection').style.display = 'none';
+        document.getElementById('checkoutFormSection').style.display = 'block';
+    };
+
+    document.getElementById('placeOrderBtn').onclick = async () => {
+        const name = document.getElementById('customerName').value.trim();
+        const phone = document.getElementById('customerPhone').value.trim();
+        const address = document.getElementById('customerAddress').value.trim();
+        const deliverySlot = document.getElementById('deliverySlot').value;
+        
+        if (!name) return alert('Please enter your name');
+        if (!validatePhone(phone)) return alert('Please enter a valid 10-digit mobile number');
+        if (!address) return alert('Please enter delivery address');
+        if (!deliverySlot) return alert('Please select a delivery slot');
+        
+        const subtotal = cart.reduce((s, i) => s + i.price * i.quantity, 0);
+        const deliveryCharge = calculateDelivery(subtotal);
+        const totalAmount = subtotal + deliveryCharge;
+        
+        const placeBtn = document.getElementById('placeOrderBtn');
+        placeBtn.textContent = 'Processing...';
+        placeBtn.disabled = true;
+        
+        const payload = {
+            customerName: name,
+            customerPhone: phone,
+            customerAddress: address,
+            deliverySlot: deliverySlot,
+            items: cart.map(i => ({ productId: i.productId, quantity: i.quantity, price: i.price, weight: i.weight })),
+            totalAmount: totalAmount
+        };
+        
+        try {
+            const res = await fetch('/api/orders', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (!res.ok) return alert(data.error);
+            
+            alert(`✅ Order Confirmed!\n\nOrder ID: ${data.orderId}\nTotal: ₹${data.totalAmount}\n\nYou can pay now using the QR code.`);
+            
+            currentUpiIntentUrl = data.upiIntentUrl;
+            document.getElementById('orderIdSpan').innerText = data.orderId;
+            document.getElementById('orderAmountSpan').innerText = data.totalAmount;
+            document.getElementById('qrCodeImg').src = data.qrCodeDataURL;
+            document.getElementById('qrPaymentSection').style.display = 'block';
+            document.getElementById('checkoutFormSection').style.display = 'none';
+            
+            cart = [];
+            updateCartUI();
+            renderProducts(allProducts);
+        } catch (err) {
+            alert('Network error. Could not place order');
+        } finally {
+            placeBtn.textContent = 'Place Order & Get QR';
+            placeBtn.disabled = false;
+        }
+    };
+
+    document.getElementById('closeModalBtn').onclick = () => {
+        orderModal.classList.remove('open');
+        overlay.classList.remove('active');
+        alert('✅ Your order has been placed successfully!\n\nYou will receive updates on WhatsApp.\n\nThank you for shopping with us! 🥬');
+    };
+
+    document.getElementById('payWithAppBtn')?.addEventListener('click', () => {
+        if (currentUpiIntentUrl) {
+            window.location.href = currentUpiIntentUrl;
+        }
+    });
+
+    window.trackOrders = async function() {
+        const phone = document.getElementById('trackPhone').value.trim();
+        if (!validatePhone(phone)) return alert('Please enter a valid 10-digit mobile number');
+        
+        try {
+            const res = await fetch(`/api/orders/${phone}`);
+            const data = await res.json();
+            if (data.error) return alert(data.error);
+            
+            const statusMap = {
+                'pending': { text: '⏳ Pending Payment', class: 'status-pending' },
+                'confirmed': { text: '✅ Payment Confirmed - Preparing Order', class: 'status-confirmed' },
+                'dispatched': { text: '🚚 Order Dispatched - On the Way!', class: 'status-dispatched' },
+                'delivered': { text: '🎉 Delivered! Enjoy Your Vegetables', class: 'status-delivered' }
+            };
+            
+            let html = `<h4>📋 Your Orders (${data.length})</h4>`;
+            data.forEach(order => {
+                const status = statusMap[order.order_status] || { text: order.order_status, class: 'status-pending' };
+                html += `
+                    <div class="track-result-card">
+                        <strong>Order #${order.id}</strong><br>
+                        <span class="status-badge ${status.class}">${status.text}</span><br>
+                        Payment: ${order.payment_status === 'paid' ? '✅ Paid' : '⏳ Awaiting Payment'}<br>
+                        Total: ₹${order.total_amount}<br>
+                        Delivery Slot: ${order.delivery_slot || 'Not selected'}<br>
+                        Date: ${new Date(order.created_at).toLocaleDateString()}
+                    </div>
+                `;
+            });
+            document.getElementById('trackResult').innerHTML = html;
+        } catch (err) {
+            alert('Error tracking orders');
+        }
+    };
+
+    loadProducts();
+    updateCartUI();
+</script>
+</body>
+</html>
