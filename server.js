@@ -529,7 +529,130 @@ app.get('/admin-page', (req, res) => {
         res.send(`<html><body style="font-family:sans-serif;text-align:center;margin-top:100px"><h2>Admin Login</h2><form id="loginForm"><input type="password" id="pwd" placeholder="Enter password" /><button type="submit">Login</button></form><script>document.getElementById('loginForm').onsubmit=async(e)=>{e.preventDefault();const pwd=document.getElementById('pwd').value;const r=await fetch('/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pwd})});if(r.ok) location.reload();else alert('Wrong password');};<\/script></body></html>`);
     }
 });
+// ==================== BULK AUTO-FETCH MISSING IMAGES ====================
+app.post('/api/admin/bulk-fetch-images', isAdmin, async (req, res) => {
+    try {
+        // Get all products with missing or external images
+        const products = db.prepare(`
+            SELECT id, name, image_url 
+            FROM products 
+            WHERE image_url IS NULL 
+               OR image_url = '' 
+               OR image_url LIKE '%placeholder%'
+               OR image_url NOT LIKE '/product_images/%'
+               OR image_url LIKE 'http%'
+        `).all();
+        
+        if (products.length === 0) {
+            return res.json({
+                success: true,
+                message: 'No products need images! All products have local images.',
+                total: 0,
+                updated: 0,
+                failed: 0
+            });
+        }
+        
+        let updated = 0;
+        let failed = 0;
+        const results = [];
+        
+        for (const product of products) {
+            try {
+                // Search Pixabay for product image
+                const searchQuery = encodeURIComponent(product.name);
+                const pixabayRes = await axios.get(`https://pixabay.com/api/?key=${PIXABAY_API_KEY}&q=${searchQuery}&image_type=photo&per_page=1`);
+                
+                if (pixabayRes.data.hits && pixabayRes.data.hits.length > 0) {
+                    const imageUrl = pixabayRes.data.hits[0].webformatURL;
+                    const localPath = await saveImageLocally(imageUrl, product.name);
+                    
+                    // Update database
+                    db.prepare(`UPDATE products SET image_url = ? WHERE id = ?`).run(localPath, product.id);
+                    updated++;
+                    results.push({
+                        id: product.id,
+                        name: product.name,
+                        status: 'success',
+                        imageUrl: localPath
+                    });
+                    console.log(`✅ Fetched image for ${product.name}`);
+                } else {
+                    failed++;
+                    results.push({
+                        id: product.id,
+                        name: product.name,
+                        status: 'failed',
+                        reason: 'No image found on Pixabay'
+                    });
+                    console.log(`❌ No image found for ${product.name}`);
+                }
+            } catch (error) {
+                failed++;
+                results.push({
+                    id: product.id,
+                    name: product.name,
+                    status: 'failed',
+                    reason: error.message
+                });
+                console.log(`❌ Error fetching image for ${product.name}:`, error.message);
+            }
+            
+            // Small delay to avoid rate limiting
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+        
+        res.json({
+            success: true,
+            message: `Completed: ${updated} images fetched, ${failed} failed`,
+            total: products.length,
+            updated: updated,
+            failed: failed,
+            results: results
+        });
+        
+    } catch (error) {
+        console.error('Bulk fetch error:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
 
+// Also add endpoint to fetch image for a single product
+app.post('/api/admin/fetch-single-image/:id', isAdmin, async (req, res) => {
+    try {
+        const productId = req.params.id;
+        const product = db.prepare(`SELECT id, name, image_url FROM products WHERE id = ?`).get(productId);
+        
+        if (!product) {
+            return res.status(404).json({ success: false, error: 'Product not found' });
+        }
+        
+        const searchQuery = encodeURIComponent(product.name);
+        const pixabayRes = await axios.get(`https://pixabay.com/api/?key=${PIXABAY_API_KEY}&q=${searchQuery}&image_type=photo&per_page=1`);
+        
+        if (pixabayRes.data.hits && pixabayRes.data.hits.length > 0) {
+            const imageUrl = pixabayRes.data.hits[0].webformatURL;
+            const localPath = await saveImageLocally(imageUrl, product.name);
+            db.prepare(`UPDATE products SET image_url = ? WHERE id = ?`).run(localPath, productId);
+            
+            res.json({
+                success: true,
+                message: `Image fetched for ${product.name}`,
+                imageUrl: localPath
+            });
+        } else {
+            res.json({
+                success: false,
+                message: `No image found for ${product.name}`
+            });
+        }
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
 app.listen(PORT, HOST, () => {
     console.log(`✅ Veggie Shop running on http://${HOST}:${PORT}`);
     console.log(`👉 Admin panel: http://${HOST}:${PORT}/admin-page`);
