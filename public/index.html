@@ -231,10 +231,17 @@
         return totalAmount >= 100 ? 0 : 30;
     }
 
-    // Load products
+    // Load products with cache busting
     async function loadProducts() {
         try {
-            const res = await fetch('/api/products');
+            // Add timestamp to prevent caching
+            const res = await fetch('/api/products?_=' + Date.now(), {
+                cache: 'no-store',
+                headers: {
+                    'Cache-Control': 'no-cache',
+                    'Pragma': 'no-cache'
+                }
+            });
             const data = await res.json();
             allProducts = data.products;
             renderProducts(allProducts);
@@ -253,6 +260,9 @@
             productsContainer.innerHTML = '<p>No vegetables available currently. Check back later!</p>';
             return;
         }
+        
+        // Add cache-busting timestamp to images
+        const cacheBuster = Date.now();
         
         productsContainer.innerHTML = productsToRender.map(p => {
             const inCartQty = getCartQuantity(p.id);
@@ -277,10 +287,13 @@
                 </select>`;
             }
             
+            // Add cache-busting query parameter to image URL
+            const imageUrl = p.image_url ? `${p.image_url}?t=${cacheBuster}` : 'https://via.placeholder.com/150?text=Veg';
+            
             return `
                 <div class="product-card">
                     ${inCart ? '<div class="added-to-cart-badge">✓ Added to Cart</div>' : ''}
-                    <img class="product-img" src="${p.image_url || 'https://via.placeholder.com/150?text=Veg'}" alt="${p.name}" onerror="this.src='https://via.placeholder.com/150?text=No+Image'">
+                    <img class="product-img" src="${imageUrl}" alt="${p.name}" onerror="this.src='https://via.placeholder.com/150?text=No+Image'">
                     <div class="product-name">${p.name}</div>
                     <div class="product-price">₹${p.price}/${unitDisplay}</div>
                     <div class="product-category">${p.category || 'Vegetables'}</div>
@@ -446,6 +459,9 @@
             });
             const data = await res.json();
             if (!res.ok) return alert(data.error);
+            
+            // Success message with order details
+            alert(`✅ Order Confirmed!\n\nOrder ID: ${data.orderId}\nTotal: ₹${data.totalAmount}\n\nYou can pay now using the QR code.`);
             
             currentUpiIntentUrl = data.upiIntentUrl;
             document.getElementById('orderIdSpan').innerText = data.orderId;
