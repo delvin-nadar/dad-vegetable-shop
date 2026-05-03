@@ -16,13 +16,11 @@ const PORT = process.env.PORT || 3000;
 const HOST = '0.0.0.0';
 
 // ==================== SECURE ADMIN PASSWORD ====================
-// Read password from environment variable ONLY (must be set in Render dashboard)
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 
 if (!ADMIN_PASSWORD) {
     console.error('❌ FATAL ERROR: ADMIN_PASSWORD environment variable is not set!');
     console.error('👉 Please set ADMIN_PASSWORD in Render dashboard -> Environment Variables');
-    console.error('👉 The server will not start without it for security reasons.');
     process.exit(1);
 }
 
@@ -85,13 +83,11 @@ async function sendTelegramAlert(message) {
 }
 
 // ==================== IMAGE HANDLING ====================
-// Create uploads directory if it doesn't exist
 const uploadsDir = path.join(__dirname, 'public', 'product_images');
 if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-// Function to download and save image locally
 async function saveImageLocally(imageUrl, productName) {
     try {
         const response = await axios({
@@ -127,25 +123,24 @@ app.get('/api/search-image/:query', async (req, res) => {
     const query = req.params.query;
     try {
         if (PIXABAY_API_KEY) {
-            // Fixed: Use URLSearchParams to ensure correct encoding
-            const params = new URLSearchParams({
-                key: PIXABAY_API_KEY,
-                q: query,
-                image_type: 'photo',
-                per_page: '3',
-                safesearch: 'true'
+            const response = await axios.get('https://pixabay.com/api/', {
+                params: {
+                    key: PIXABAY_API_KEY,
+                    q: query,
+                    image_type: 'photo',
+                    per_page: 3,
+                    safesearch: true
+                }
             });
             
-            const pixabayRes = await axios.get(`https://pixabay.com/api/?${params.toString()}`);
-            
-            if (pixabayRes.data && pixabayRes.data.hits && pixabayRes.data.hits.length > 0) {
-                let imageUrl = pixabayRes.data.hits[0].webformatURL;
+            if (response.data && response.data.hits && response.data.hits.length > 0) {
+                let imageUrl = response.data.hits[0].webformatURL;
                 const localImagePath = await saveImageLocally(imageUrl, query);
                 
                 res.json({
                     success: true,
                     imageUrl: localImagePath,
-                    photographer: pixabayRes.data.hits[0].user,
+                    photographer: response.data.hits[0].user,
                     source: 'Pixabay (saved locally)'
                 });
                 return;
@@ -158,226 +153,9 @@ app.get('/api/search-image/:query', async (req, res) => {
     }
 });
 
-// Fetch single image for a product - FIXED
-app.post('/api/admin/fetch-single-image/:id', isAdmin, async (req, res) => {
-    try {
-        const productId = req.params.id;
-        const product = db.prepare(`SELECT id, name FROM products WHERE id = ?`).get(productId);
-        
-        if (!product) {
-            return res.status(404).json({ success: false, error: 'Product not found' });
-        }
-        
-        const params = new URLSearchParams({
-            key: PIXABAY_API_KEY,
-            q: product.name,
-            image_type: 'photo',
-            per_page: '1',
-            safesearch: 'true'
-        });
-        
-        const pixabayRes = await axios.get(`https://pixabay.com/api/?${params.toString()}`);
-        
-        if (pixabayRes.data && pixabayRes.data.hits && pixabayRes.data.hits.length > 0) {
-            const imageUrl = pixabayRes.data.hits[0].webformatURL;
-            const localPath = await saveImageLocally(imageUrl, product.name);
-            db.prepare(`UPDATE products SET image_url = ? WHERE id = ?`).run(localPath, productId);
-            
-            res.json({
-                success: true,
-                message: `Image fetched for ${product.name}`,
-                imageUrl: localPath
-            });
-        } else {
-            res.json({
-                success: false,
-                message: `No image found for ${product.name} on Pixabay`
-            });
-        }
-    } catch (error) {
-        console.error('Single fetch error:', error);
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// Bulk fetch missing images - FIXED
-app.post('/api/admin/bulk-fetch-images', isAdmin, async (req, res) => {
-    try {
-        const products = db.prepare(`
-            SELECT id, name, image_url 
-            FROM products 
-            WHERE image_url IS NULL 
-               OR image_url = '' 
-               OR image_url LIKE '%placeholder%'
-               OR image_url NOT LIKE '/product_images/%'
-               OR image_url LIKE 'http%'
-        `).all();
-        
-        if (products.length === 0) {
-            return res.json({
-                success: true,
-                message: 'No products need images!',
-                total: 0,
-                updated: 0,
-                failed: 0,
-                results: []
-            });
-        }
-        
-        let updated = 0;
-        let failed = 0;
-        const results = [];
-        
-        for (const product of products) {
-            try {
-                const params = new URLSearchParams({
-                    key: PIXABAY_API_KEY,
-                    q: product.name,
-                    image_type: 'photo',
-                    per_page: '1',
-                    safesearch: 'true'
-                });
-                
-                const pixabayRes = await axios.get(`https://pixabay.com/api/?${params.toString()}`);
-                
-                if (pixabayRes.data && pixabayRes.data.hits && pixabayRes.data.hits.length > 0) {
-                    const imageUrl = pixabayRes.data.hits[0].webformatURL;
-                    const localPath = await saveImageLocally(imageUrl, product.name);
-                    db.prepare(`UPDATE products SET image_url = ? WHERE id = ?`).run(localPath, product.id);
-                    updated++;
-                    results.push({
-                        id: product.id,
-                        name: product.name,
-                        status: 'success',
-                        imageUrl: localPath
-                    });
-                    console.log(`✅ Fetched image for ${product.name}`);
-                } else {
-                    failed++;
-                    results.push({
-                        id: product.id,
-                        name: product.name,
-                        status: 'failed',
-                        reason: 'No image found on Pixabay'
-                    });
-                    console.log(`❌ No image found for ${product.name}`);
-                }
-            } catch (error) {
-                failed++;
-                results.push({
-                    id: product.id,
-                    name: product.name,
-                    status: 'failed',
-                    reason: error.message
-                });
-                console.log(`❌ Error fetching image for ${product.name}:`, error.message);
-            }
-            
-            await new Promise(resolve => setTimeout(resolve, 500));
-        }
-        
-        res.json({
-            success: true,
-            message: `Completed: ${updated} images fetched, ${failed} failed`,
-            total: products.length,
-            updated: updated,
-            failed: failed,
-            results: results
-        });
-    } catch (error) {
-        console.error('Bulk fetch error:', error);
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// Bulk fetch missing images - FIXED
-app.post('/api/admin/bulk-fetch-images', isAdmin, async (req, res) => {
-    try {
-        const products = db.prepare(`
-            SELECT id, name, image_url 
-            FROM products 
-            WHERE image_url IS NULL 
-               OR image_url = '' 
-               OR image_url LIKE '%placeholder%'
-               OR image_url NOT LIKE '/product_images/%'
-               OR image_url LIKE 'http%'
-        `).all();
-        
-        if (products.length === 0) {
-            return res.json({
-                success: true,
-                message: 'No products need images!',
-                total: 0,
-                updated: 0,
-                failed: 0,
-                results: []
-            });
-        }
-        
-        let updated = 0;
-        let failed = 0;
-        const results = [];
-        
-        for (const product of products) {
-            try {
-                // Fixed: Use per_page=1 with safesearch=true
-                const pixabayRes = await axios.get(`https://pixabay.com/api/?key=${PIXABAY_API_KEY}&q=${encodeURIComponent(product.name)}&image_type=photo&per_page=1&safesearch=true`);
-                
-                if (pixabayRes.data && pixabayRes.data.hits && pixabayRes.data.hits.length > 0) {
-                    const imageUrl = pixabayRes.data.hits[0].webformatURL;
-                    const localPath = await saveImageLocally(imageUrl, product.name);
-                    db.prepare(`UPDATE products SET image_url = ? WHERE id = ?`).run(localPath, product.id);
-                    updated++;
-                    results.push({
-                        id: product.id,
-                        name: product.name,
-                        status: 'success',
-                        imageUrl: localPath
-                    });
-                    console.log(`✅ Fetched image for ${product.name}`);
-                } else {
-                    failed++;
-                    results.push({
-                        id: product.id,
-                        name: product.name,
-                        status: 'failed',
-                        reason: 'No image found on Pixabay'
-                    });
-                    console.log(`❌ No image found for ${product.name}`);
-                }
-            } catch (error) {
-                failed++;
-                results.push({
-                    id: product.id,
-                    name: product.name,
-                    status: 'failed',
-                    reason: error.message
-                });
-                console.log(`❌ Error fetching image for ${product.name}:`, error.message);
-            }
-            
-            // Delay to avoid rate limiting
-            await new Promise(resolve => setTimeout(resolve, 500));
-        }
-        
-        res.json({
-            success: true,
-            message: `Completed: ${updated} images fetched, ${failed} failed`,
-            total: products.length,
-            updated: updated,
-            failed: failed,
-            results: results
-        });
-    } catch (error) {
-        console.error('Bulk fetch error:', error);
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
 // ==================== DATABASE SETUP ====================
 const db = new Database('./vegetable_shop.db');
 
-// Create tables (always run - safe)
 db.exec(`
     CREATE TABLE IF NOT EXISTS products (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -410,13 +188,11 @@ db.exec(`
     );
 `);
 
-// Add missing columns safely
 try { db.exec(`ALTER TABLE products ADD COLUMN unit TEXT DEFAULT 'kg';`); } catch (e) {}
 try { db.exec(`ALTER TABLE products ADD COLUMN weight_options TEXT DEFAULT '1kg';`); } catch (e) {}
 try { db.exec(`ALTER TABLE orders ADD COLUMN delivery_slot TEXT;`); } catch (e) {}
 try { db.exec(`ALTER TABLE order_items ADD COLUMN weight TEXT;`); } catch (e) {}
 
-// Only insert sample data if NO products exist AND it's a fresh database
 const productCount = db.prepare('SELECT COUNT(*) as count FROM products').get();
 const orderCount = db.prepare('SELECT COUNT(*) as count FROM orders').get();
 
@@ -434,133 +210,13 @@ if (productCount.count === 0 && orderCount.count === 0) {
     for (const v of veggies) insert.run(v);
     console.log('✅ Sample products inserted.');
 } else {
-    console.log(`📊 Existing database found: ${productCount.count} products, ${orderCount.count} orders. Skipping sample insertion.`);
+    console.log(`📊 Existing database found: ${productCount.count} products, ${orderCount.count} orders.`);
 }
 
 function isAdmin(req, res, next) {
     if (req.session && req.session.admin) return next();
     else return res.status(401).json({ error: 'Unauthorized' });
 }
-
-// ==================== BULK PRODUCT UPLOAD ====================
-app.get('/api/admin/products/template', isAdmin, (req, res) => {
-    const templateHeaders = ['name', 'price', 'stock', 'unit', 'weight_options', 'category', 'image_url', 'description'];
-    
-    let csvContent = templateHeaders.join(',') + '\n';
-    csvContent += 'Tomato,40,100,kg,"250g,500g,1kg",Vegetables,,Fresh red tomatoes\n';
-    csvContent += 'Potato,30,100,kg,"250g,500g,1kg",Vegetables,,Farm potatoes\n';
-    
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', 'attachment; filename="product_template.csv"');
-    res.send(csvContent);
-});
-
-const csvUpload = multer({ dest: 'uploads/' });
-app.post('/api/admin/products/bulk', isAdmin, csvUpload.single('csvFile'), async (req, res) => {
-    try {
-        if (!req.file) return res.status(400).json({ error: 'No CSV file uploaded' });
-        
-        if (!req.file.originalname.toLowerCase().endsWith('.csv')) {
-            fs.unlinkSync(req.file.path);
-            return res.status(400).json({ error: 'Only CSV files are allowed' });
-        }
-        
-        const results = [];
-        const errors = [];
-        
-        await new Promise((resolve, reject) => {
-            fs.createReadStream(req.file.path)
-                .pipe(csv())
-                .on('data', (data) => results.push(data))
-                .on('end', resolve)
-                .on('error', reject);
-        });
-        
-        const insertedProducts = [];
-        for (let i = 0; i < results.length; i++) {
-            const row = results[i];
-            const rowNum = i + 2;
-            
-            if (!row.name || !row.price || !row.stock) {
-                errors.push(`Row ${rowNum}: Missing required fields`);
-                continue;
-            }
-            
-            if (isNaN(parseFloat(row.price))) {
-                errors.push(`Row ${rowNum}: Price must be a number`);
-                continue;
-            }
-            
-            let finalImageUrl = row.image_url || '';
-            if (finalImageUrl && (finalImageUrl.includes('pixabay') || finalImageUrl.includes('unsplash') || finalImageUrl.includes('imgur'))) {
-                finalImageUrl = await saveImageLocally(finalImageUrl, row.name);
-            }
-            
-            const insert = db.prepare(`INSERT INTO products (name, description, price, stock, image_url, category, unit, weight_options) VALUES (?,?,?,?,?,?,?,?)`);
-            const result = insert.run(
-                row.name.trim(),
-                row.description || '',
-                parseFloat(row.price),
-                parseInt(row.stock),
-                finalImageUrl,
-                row.category || 'Vegetables',
-                row.unit || 'kg',
-                row.weight_options || '250g,500g,1kg'
-            );
-            
-            insertedProducts.push({ id: result.lastInsertRowid, name: row.name });
-        }
-        
-        fs.unlinkSync(req.file.path);
-        
-        res.json({
-            success: true,
-            message: `${insertedProducts.length} products added successfully`,
-            inserted: insertedProducts,
-            errors: errors
-        });
-    } catch (error) {
-        console.error('Bulk upload error:', error);
-        if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-        res.status(500).json({ error: 'Bulk upload failed: ' + error.message });
-    }
-});
-
-// Auto-fetch missing images for all products
-app.post('/api/admin/auto-fetch-missing-images', isAdmin, async (req, res) => {
-    const products = db.prepare(`SELECT id, name, image_url FROM products WHERE image_url IS NULL OR image_url = '' OR image_url LIKE '%placeholder%' OR image_url NOT LIKE '/product_images/%'`).all();
-    
-    let updated = 0;
-    let failed = 0;
-    
-    for (const product of products) {
-        try {
-            const pixabayRes = await axios.get(`https://pixabay.com/api/?key=${PIXABAY_API_KEY}&q=${encodeURIComponent(product.name)}&image_type=photo&per_page=1`);
-            
-            if (pixabayRes.data.hits && pixabayRes.data.hits.length > 0) {
-                const imageUrl = pixabayRes.data.hits[0].webformatURL;
-                const localPath = await saveImageLocally(imageUrl, product.name);
-                db.prepare(`UPDATE products SET image_url = ? WHERE id = ?`).run(localPath, product.id);
-                updated++;
-                console.log(`✅ Auto-fetched image for ${product.name}`);
-            } else {
-                failed++;
-            }
-        } catch (e) {
-            failed++;
-            console.log(`Failed to fetch image for ${product.name}:`, e.message);
-        }
-        
-        await new Promise(resolve => setTimeout(resolve, 500));
-    }
-    
-    res.json({
-        success: true,
-        message: `Auto-fetched images for ${updated} products. Failed: ${failed}`,
-        updated: updated,
-        failed: failed
-    });
-});
 
 // ==================== CUSTOMER API ENDPOINTS ====================
 app.get('/api/products', (req, res) => {
@@ -710,137 +366,28 @@ app.put('/api/admin/orders/:id/deliver', isAdmin, async (req, res) => {
     res.json({ success: true });
 });
 
-// ==================== HEALTH & PAGE ROUTES ====================
-app.get('/healthz', (req, res) => {
-    res.status(200).send('OK');
-});
-
-// Graceful shutdown handlers
-process.on('SIGTERM', () => {
-    console.log('SIGTERM received, closing database...');
-    db.close();
-    process.exit(0);
-});
-
-process.on('SIGINT', () => {
-    console.log('SIGINT received, closing database...');
-    db.close();
-    process.exit(0);
-});
-
-app.get('/admin-page', (req, res) => {
-    if (req.session && req.session.admin) {
-        res.sendFile(path.join(__dirname, 'public', 'admin.html'));
-    } else {
-        res.send(`<html><body style="font-family:sans-serif;text-align:center;margin-top:100px"><h2>Admin Login</h2><form id="loginForm"><input type="password" id="pwd" placeholder="Enter password" /><button type="submit">Login</button></form><script>document.getElementById('loginForm').onsubmit=async(e)=>{e.preventDefault();const pwd=document.getElementById('pwd').value;const r=await fetch('/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pwd})});if(r.ok) location.reload();else alert('Wrong password');};<\/script></body></html>`);
-    }
-});
-// ==================== BULK AUTO-FETCH MISSING IMAGES ====================
-app.post('/api/admin/bulk-fetch-images', isAdmin, async (req, res) => {
-    try {
-        // Get all products with missing or external images
-        const products = db.prepare(`
-            SELECT id, name, image_url 
-            FROM products 
-            WHERE image_url IS NULL 
-               OR image_url = '' 
-               OR image_url LIKE '%placeholder%'
-               OR image_url NOT LIKE '/product_images/%'
-               OR image_url LIKE 'http%'
-        `).all();
-        
-        if (products.length === 0) {
-            return res.json({
-                success: true,
-                message: 'No products need images! All products have local images.',
-                total: 0,
-                updated: 0,
-                failed: 0
-            });
-        }
-        
-        let updated = 0;
-        let failed = 0;
-        const results = [];
-        
-        for (const product of products) {
-            try {
-                // Search Pixabay for product image
-                const searchQuery = encodeURIComponent(product.name);
-                const pixabayRes = await axios.get(`https://pixabay.com/api/?key=${PIXABAY_API_KEY}&q=${searchQuery}&image_type=photo&per_page=1`);
-                
-                if (pixabayRes.data.hits && pixabayRes.data.hits.length > 0) {
-                    const imageUrl = pixabayRes.data.hits[0].webformatURL;
-                    const localPath = await saveImageLocally(imageUrl, product.name);
-                    
-                    // Update database
-                    db.prepare(`UPDATE products SET image_url = ? WHERE id = ?`).run(localPath, product.id);
-                    updated++;
-                    results.push({
-                        id: product.id,
-                        name: product.name,
-                        status: 'success',
-                        imageUrl: localPath
-                    });
-                    console.log(`✅ Fetched image for ${product.name}`);
-                } else {
-                    failed++;
-                    results.push({
-                        id: product.id,
-                        name: product.name,
-                        status: 'failed',
-                        reason: 'No image found on Pixabay'
-                    });
-                    console.log(`❌ No image found for ${product.name}`);
-                }
-            } catch (error) {
-                failed++;
-                results.push({
-                    id: product.id,
-                    name: product.name,
-                    status: 'failed',
-                    reason: error.message
-                });
-                console.log(`❌ Error fetching image for ${product.name}:`, error.message);
-            }
-            
-            // Small delay to avoid rate limiting
-            await new Promise(resolve => setTimeout(resolve, 500));
-        }
-        
-        res.json({
-            success: true,
-            message: `Completed: ${updated} images fetched, ${failed} failed`,
-            total: products.length,
-            updated: updated,
-            failed: failed,
-            results: results
-        });
-        
-    } catch (error) {
-        console.error('Bulk fetch error:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
-});
-
-// Also add endpoint to fetch image for a single product
+// ==================== IMAGE FETCH ENDPOINTS ====================
 app.post('/api/admin/fetch-single-image/:id', isAdmin, async (req, res) => {
     try {
         const productId = req.params.id;
-        const product = db.prepare(`SELECT id, name, image_url FROM products WHERE id = ?`).get(productId);
+        const product = db.prepare(`SELECT id, name FROM products WHERE id = ?`).get(productId);
         
         if (!product) {
             return res.status(404).json({ success: false, error: 'Product not found' });
         }
         
-        const searchQuery = encodeURIComponent(product.name);
-        const pixabayRes = await axios.get(`https://pixabay.com/api/?key=${PIXABAY_API_KEY}&q=${searchQuery}&image_type=photo&per_page=1`);
+        const response = await axios.get('https://pixabay.com/api/', {
+            params: {
+                key: PIXABAY_API_KEY,
+                q: product.name,
+                image_type: 'photo',
+                per_page: 1,
+                safesearch: true
+            }
+        });
         
-        if (pixabayRes.data.hits && pixabayRes.data.hits.length > 0) {
-            const imageUrl = pixabayRes.data.hits[0].webformatURL;
+        if (response.data && response.data.hits && response.data.hits.length > 0) {
+            const imageUrl = response.data.hits[0].webformatURL;
             const localPath = await saveImageLocally(imageUrl, product.name);
             db.prepare(`UPDATE products SET image_url = ? WHERE id = ?`).run(localPath, productId);
             
@@ -852,15 +399,182 @@ app.post('/api/admin/fetch-single-image/:id', isAdmin, async (req, res) => {
         } else {
             res.json({
                 success: false,
-                message: `No image found for ${product.name}`
+                message: `No image found for ${product.name} on Pixabay`
             });
         }
     } catch (error) {
+        console.error('Single fetch error:', error.message);
         res.status(500).json({ success: false, error: error.message });
     }
 });
+
+app.post('/api/admin/bulk-fetch-images', isAdmin, async (req, res) => {
+    try {
+        const products = db.prepare(`
+            SELECT id, name, image_url 
+            FROM products 
+            WHERE image_url IS NULL 
+               OR image_url = '' 
+               OR image_url LIKE '%placeholder%'
+               OR image_url NOT LIKE '/product_images/%'
+        `).all();
+        
+        if (products.length === 0) {
+            return res.json({
+                success: true,
+                message: 'No products need images!',
+                total: 0,
+                updated: 0,
+                failed: 0,
+                results: []
+            });
+        }
+        
+        let updated = 0;
+        let failed = 0;
+        const results = [];
+        
+        for (const product of products) {
+            try {
+                const response = await axios.get('https://pixabay.com/api/', {
+                    params: {
+                        key: PIXABAY_API_KEY,
+                        q: product.name,
+                        image_type: 'photo',
+                        per_page: 1,
+                        safesearch: true
+                    }
+                });
+                
+                if (response.data && response.data.hits && response.data.hits.length > 0) {
+                    const imageUrl = response.data.hits[0].webformatURL;
+                    const localPath = await saveImageLocally(imageUrl, product.name);
+                    db.prepare(`UPDATE products SET image_url = ? WHERE id = ?`).run(localPath, product.id);
+                    updated++;
+                    results.push({
+                        id: product.id,
+                        name: product.name,
+                        status: 'success'
+                    });
+                    console.log(`✅ Fetched image for ${product.name}`);
+                } else {
+                    failed++;
+                    results.push({
+                        id: product.id,
+                        name: product.name,
+                        status: 'failed',
+                        reason: 'No image found'
+                    });
+                }
+            } catch (error) {
+                failed++;
+                results.push({
+                    id: product.id,
+                    name: product.name,
+                    status: 'failed',
+                    reason: error.message
+                });
+            }
+            
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+        
+        res.json({
+            success: true,
+            message: `Completed: ${updated} images fetched, ${failed} failed`,
+            total: products.length,
+            updated: updated,
+            failed: failed,
+            results: results
+        });
+    } catch (error) {
+        console.error('Bulk fetch error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// ==================== BULK PRODUCT UPLOAD ====================
+app.get('/api/admin/products/template', isAdmin, (req, res) => {
+    const templateHeaders = ['name', 'price', 'stock', 'unit', 'weight_options', 'category', 'image_url', 'description'];
+    let csvContent = templateHeaders.join(',') + '\n';
+    csvContent += 'Tomato,40,100,kg,"250g,500g,1kg",Vegetables,,Fresh red tomatoes\n';
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="product_template.csv"');
+    res.send(csvContent);
+});
+
+const csvUpload = multer({ dest: 'uploads/' });
+app.post('/api/admin/products/bulk', isAdmin, csvUpload.single('csvFile'), async (req, res) => {
+    try {
+        if (!req.file) return res.status(400).json({ error: 'No CSV file uploaded' });
+        
+        const results = [];
+        await new Promise((resolve, reject) => {
+            fs.createReadStream(req.file.path)
+                .pipe(csv())
+                .on('data', (data) => results.push(data))
+                .on('end', resolve)
+                .on('error', reject);
+        });
+        
+        const insertedProducts = [];
+        for (const row of results) {
+            if (!row.name || !row.price || !row.stock) continue;
+            
+            const insert = db.prepare(`INSERT INTO products (name, description, price, stock, image_url, category, unit, weight_options) VALUES (?,?,?,?,?,?,?,?)`);
+            const result = insert.run(
+                row.name.trim(),
+                row.description || '',
+                parseFloat(row.price),
+                parseInt(row.stock),
+                row.image_url || '',
+                row.category || 'Vegetables',
+                row.unit || 'kg',
+                row.weight_options || '250g,500g,1kg'
+            );
+            insertedProducts.push({ id: result.lastInsertRowid, name: row.name });
+        }
+        
+        fs.unlinkSync(req.file.path);
+        res.json({ success: true, message: `${insertedProducts.length} products added`, inserted: insertedProducts });
+    } catch (error) {
+        if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        res.status(500).json({ error: 'Bulk upload failed: ' + error.message });
+    }
+});
+
+// ==================== IMAGE UPLOAD ====================
+app.post('/api/upload-image', upload.single('image'), async (req, res) => {
+    try {
+        if (!req.file) return res.status(400).json({ success: false, error: 'No image file' });
+        const extension = req.file.originalname.split('.').pop();
+        const filename = `${Date.now()}_upload.${extension}`;
+        const localPath = `/product_images/${filename}`;
+        const filePath = path.join(__dirname, 'public', localPath);
+        fs.writeFileSync(filePath, req.file.buffer);
+        res.json({ success: true, url: localPath });
+    } catch (error) {
+        res.status(500).json({ success: false, error: 'Upload failed' });
+    }
+});
+
+// ==================== HEALTH & PAGE ROUTES ====================
+app.get('/healthz', (req, res) => {
+    res.status(200).send('OK');
+});
+
+process.on('SIGTERM', () => { db.close(); process.exit(0); });
+process.on('SIGINT', () => { db.close(); process.exit(0); });
+
+app.get('/admin-page', (req, res) => {
+    if (req.session && req.session.admin) {
+        res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+    } else {
+        res.send(`<html><body style="font-family:sans-serif;text-align:center;margin-top:100px"><h2>Admin Login</h2><form id="loginForm"><input type="password" id="pwd" placeholder="Enter password" /><button type="submit">Login</button></form><script>document.getElementById('loginForm').onsubmit=async(e)=>{e.preventDefault();const pwd=document.getElementById('pwd').value;const r=await fetch('/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pwd})});if(r.ok) location.reload();else alert('Wrong password');};<\/script></body></html>`);
+    }
+});
+
 app.listen(PORT, HOST, () => {
     console.log(`✅ Veggie Shop running on http://${HOST}:${PORT}`);
     console.log(`👉 Admin panel: http://${HOST}:${PORT}/admin-page`);
-    console.log(`🔐 Admin password is set via environment variable (not shown here)`);
 });
