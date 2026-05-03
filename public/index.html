@@ -293,7 +293,7 @@
             return `
                 <div class="product-card">
                     ${inCart ? '<div class="added-to-cart-badge">✓ Added to Cart</div>' : ''}
-                    <img class="product-img" src="${imageUrl}" alt="${p.name}" onerror="this.src='https://via.placeholder.com/150?text=No+Image'">
+<img class="product-img" src="${imageUrl}" alt="${p.name}">
                     <div class="product-name">${p.name}</div>
                     <div class="product-price">₹${p.price}/${unitDisplay}</div>
                     <div class="product-category">${p.category || 'Vegetables'}</div>
