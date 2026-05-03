@@ -26,6 +26,7 @@ if (!ADMIN_PASSWORD) {
 
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
+app.use('/product_images', express.static(path.join(__dirname, 'public', 'product_images'))); // ADD THIS LINE
 // Explicitly serve product_images folder
 app.use('/product_images', express.static(path.join(__dirname, 'public', 'product_images')));
 app.use(session({ secret: 'dadveggie123', resave: false, saveUninitialized: true, cookie: { secure: false } }));
