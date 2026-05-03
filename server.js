@@ -653,6 +653,30 @@ app.get('/admin-page', (req, res) => {
     }
 });
 
+// Temporary endpoint to fix image URLs
+app.get('/api/fix-product-images', isAdmin, (req, res) => {
+    const products = db.prepare(`SELECT id, name FROM products`).all();
+    
+    for (const product of products) {
+        const name = product.name.toLowerCase();
+        let imageUrl = '';
+        
+        if (name === 'tomato') imageUrl = '/product_images/tomato_sample.jpg';
+        else if (name === 'potato') imageUrl = '/product_images/potato_sample.jpg';
+        else if (name === 'onion') imageUrl = '/product_images/onion_sample.jpg';
+        else if (name === 'carrot') imageUrl = '/product_images/carrot_sample.jpg';
+        else if (name === 'spinach') imageUrl = '/product_images/spinach_sample.jpg';
+        else if (name === 'cucumber') imageUrl = '/product_images/cucumber_sample.jpg';
+        
+        if (imageUrl) {
+            db.prepare(`UPDATE products SET image_url = ? WHERE id = ?`).run(imageUrl, product.id);
+            console.log(`✅ Updated ${product.name} -> ${imageUrl}`);
+        }
+    }
+    
+    res.json({ success: true, message: 'Product images updated!' });
+});
+
 app.listen(PORT, HOST, () => {
     console.log(`✅ Veggie Shop running on http://${HOST}:${PORT}`);
     console.log(`👉 Admin panel: http://${HOST}:${PORT}/admin-page`);
