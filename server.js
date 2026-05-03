@@ -116,6 +116,39 @@ async function saveImageLocally(imageUrl, productName) {
     }
 }
 
+// ==================== SIMPLE PLACEHOLDER GENERATOR (NO CANVAS NEEDED) ====================
+async function generatePlaceholderImage(productName) {
+    const safeName = productName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+    const filename = `${Date.now()}_${safeName}.jpg`;
+    const localPath = `/product_images/${filename}`;
+    
+    // Use placehold.co (free, no API key, no rate limits)
+    const placeholderUrl = `https://placehold.co/400x300/2e7d32/white?text=${encodeURIComponent(productName)}`;
+    
+    try {
+        const response = await axios({
+            method: 'GET',
+            url: placeholderUrl,
+            responseType: 'stream',
+            timeout: 10000
+        });
+        
+        const filePath = path.join(__dirname, 'public', localPath);
+        const writer = fs.createWriteStream(filePath);
+        response.data.pipe(writer);
+        
+        await new Promise((resolve, reject) => {
+            writer.on('finish', resolve);
+            writer.on('error', reject);
+        });
+        
+        return localPath;
+    } catch (error) {
+        console.log('Placeholder download failed, using URL:', error.message);
+        return placeholderUrl;
+    }
+}
+
 // ==================== AUTOMATIC IMAGE SEARCH ====================
 const PIXABAY_API_KEY = process.env.PIXABAY_API_KEY || '55691830-fab6eda5df88dbd0ea5299345';
 
@@ -366,7 +399,7 @@ app.put('/api/admin/orders/:id/deliver', isAdmin, async (req, res) => {
     res.json({ success: true });
 });
 
-// ==================== IMAGE FETCH ENDPOINTS ====================
+// ==================== IMAGE FETCH ENDPOINTS WITH PLACEHOLDER FALLBACK ====================
 app.post('/api/admin/fetch-single-image/:id', isAdmin, async (req, res) => {
     try {
         const productId = req.params.id;
@@ -376,31 +409,54 @@ app.post('/api/admin/fetch-single-image/:id', isAdmin, async (req, res) => {
             return res.status(404).json({ success: false, error: 'Product not found' });
         }
         
-        const response = await axios.get('https://pixabay.com/api/', {
-            params: {
-                key: PIXABAY_API_KEY,
-                q: product.name,
-                image_type: 'photo',
-                per_page: 1,
-                safesearch: true
-            }
-        });
+        let success = false;
+        let message = '';
+        let imageUrl = '';
         
-        if (response.data && response.data.hits && response.data.hits.length > 0) {
-            const imageUrl = response.data.hits[0].webformatURL;
-            const localPath = await saveImageLocally(imageUrl, product.name);
-            db.prepare(`UPDATE products SET image_url = ? WHERE id = ?`).run(localPath, productId);
+        // Try Pixabay first
+        try {
+            const response = await axios.get('https://pixabay.com/api/', {
+                params: {
+                    key: PIXABAY_API_KEY,
+                    q: product.name,
+                    image_type: 'photo',
+                    per_page: 1,
+                    safesearch: true
+                },
+                timeout: 10000
+            });
             
-            res.json({
-                success: true,
-                message: `Image fetched for ${product.name}`,
-                imageUrl: localPath
-            });
+            if (response.data && response.data.hits && response.data.hits.length > 0) {
+                imageUrl = response.data.hits[0].webformatURL;
+                const localPath = await saveImageLocally(imageUrl, product.name);
+                db.prepare(`UPDATE products SET image_url = ? WHERE id = ?`).run(localPath, productId);
+                success = true;
+                message = `Image fetched from Pixabay for ${product.name}`;
+                console.log(`✅ ${message}`);
+            }
+        } catch (pixabayError) {
+            console.log(`Pixabay failed for ${product.name}: ${pixabayError.message}`);
+        }
+        
+        // If Pixabay failed, use placeholder
+        if (!success) {
+            try {
+                const localPath = await generatePlaceholderImage(product.name);
+                db.prepare(`UPDATE products SET image_url = ? WHERE id = ?`).run(localPath, productId);
+                success = true;
+                message = `Placeholder generated for ${product.name}`;
+                console.log(`✅ ${message}`);
+                imageUrl = localPath;
+            } catch (placeholderError) {
+                message = `Failed to generate placeholder for ${product.name}`;
+                console.log(`❌ ${message}`);
+            }
+        }
+        
+        if (success) {
+            res.json({ success: true, message: message, imageUrl: imageUrl });
         } else {
-            res.json({
-                success: false,
-                message: `No image found for ${product.name} on Pixabay`
-            });
+            res.json({ success: false, message: message });
         }
     } catch (error) {
         console.error('Single fetch error:', error.message);
@@ -419,6 +475,8 @@ app.post('/api/admin/bulk-fetch-images', isAdmin, async (req, res) => {
                OR image_url NOT LIKE '/product_images/%'
         `).all();
         
+        console.log(`Found ${products.length} products needing images`);
+        
         if (products.length === 0) {
             return res.json({
                 success: true,
@@ -435,6 +493,9 @@ app.post('/api/admin/bulk-fetch-images', isAdmin, async (req, res) => {
         const results = [];
         
         for (const product of products) {
+            let productSuccess = false;
+            
+            // Try Pixabay first
             try {
                 const response = await axios.get('https://pixabay.com/api/', {
                     params: {
@@ -443,7 +504,8 @@ app.post('/api/admin/bulk-fetch-images', isAdmin, async (req, res) => {
                         image_type: 'photo',
                         per_page: 1,
                         safesearch: true
-                    }
+                    },
+                    timeout: 10000
                 });
                 
                 if (response.data && response.data.hits && response.data.hits.length > 0) {
@@ -454,34 +516,48 @@ app.post('/api/admin/bulk-fetch-images', isAdmin, async (req, res) => {
                     results.push({
                         id: product.id,
                         name: product.name,
-                        status: 'success'
+                        status: 'success',
+                        source: 'Pixabay'
                     });
-                    console.log(`✅ Fetched image for ${product.name}`);
-                } else {
+                    console.log(`✅ Fetched Pixabay image for ${product.name}`);
+                    productSuccess = true;
+                }
+            } catch (pixabayError) {
+                console.log(`Pixabay failed for ${product.name}: ${pixabayError.message}`);
+            }
+            
+            // If Pixabay failed, use placeholder
+            if (!productSuccess) {
+                try {
+                    const localPath = await generatePlaceholderImage(product.name);
+                    db.prepare(`UPDATE products SET image_url = ? WHERE id = ?`).run(localPath, product.id);
+                    updated++;
+                    results.push({
+                        id: product.id,
+                        name: product.name,
+                        status: 'success',
+                        source: 'Placeholder'
+                    });
+                    console.log(`✅ Generated placeholder for ${product.name}`);
+                    productSuccess = true;
+                } catch (placeholderError) {
                     failed++;
                     results.push({
                         id: product.id,
                         name: product.name,
                         status: 'failed',
-                        reason: 'No image found'
+                        reason: placeholderError.message
                     });
+                    console.log(`❌ Failed for ${product.name}: ${placeholderError.message}`);
                 }
-            } catch (error) {
-                failed++;
-                results.push({
-                    id: product.id,
-                    name: product.name,
-                    status: 'failed',
-                    reason: error.message
-                });
             }
             
-            await new Promise(resolve => setTimeout(resolve, 500));
+            await new Promise(resolve => setTimeout(resolve, 300));
         }
         
         res.json({
             success: true,
-            message: `Completed: ${updated} images fetched, ${failed} failed`,
+            message: `Completed: ${updated} images/placeholders generated, ${failed} failed`,
             total: products.length,
             updated: updated,
             failed: failed,
