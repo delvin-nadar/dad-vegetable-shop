@@ -675,6 +675,25 @@ app.get('/api/fix-product-images', isAdmin, (req, res) => {
     res.json({ success: true, message: 'Product images updated!' });
 });
 
+// Set online images for all products (from Pixabay)
+app.get('/api/set-online-images', isAdmin, (req, res) => {
+    const images = {
+        1: 'https://cdn.pixabay.com/photo/2020/06/01/13/55/tomatoes-5247827_640.jpg',
+        2: 'https://cdn.pixabay.com/photo/2016/08/11/08/04/potatoes-1585075_640.jpg',
+        3: 'https://cdn.pixabay.com/photo/2020/07/15/20/38/onion-5409359_640.jpg',
+        4: 'https://cdn.pixabay.com/photo/2017/06/23/06/04/carrots-2433439_640.jpg',
+        5: 'https://cdn.pixabay.com/photo/2016/03/26/16/44/spinach-1280831_640.jpg',
+        6: 'https://cdn.pixabay.com/photo/2016/07/24/17/33/cucumber-1538652_640.jpg'
+    };
+    
+    for (const [id, url] of Object.entries(images)) {
+        db.prepare(`UPDATE products SET image_url = ? WHERE id = ?`).run(url, id);
+        console.log(`✅ Updated product ${id} with online image`);
+    }
+    
+    res.json({ success: true, message: 'Online images set for all products!' });
+});
+
 app.listen(PORT, HOST, () => {
     console.log(`✅ Veggie Shop running on http://${HOST}:${PORT}`);
     console.log(`👉 Admin panel: http://${HOST}:${PORT}/admin-page`);
