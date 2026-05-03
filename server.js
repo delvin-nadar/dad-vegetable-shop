@@ -15,6 +15,17 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const HOST = '0.0.0.0';
 
+// ==================== SECURE ADMIN PASSWORD ====================
+// Read password from environment variable ONLY (must be set in Render dashboard)
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+
+if (!ADMIN_PASSWORD) {
+    console.error('❌ FATAL ERROR: ADMIN_PASSWORD environment variable is not set!');
+    console.error('👉 Please set ADMIN_PASSWORD in Render dashboard -> Environment Variables');
+    console.error('👉 The server will not start without it for security reasons.');
+    process.exit(1);
+}
+
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(session({ secret: 'dadveggie123', resave: false, saveUninitialized: true, cookie: { secure: false } }));
@@ -115,7 +126,7 @@ const PIXABAY_API_KEY = process.env.PIXABAY_API_KEY || '';
 app.get('/api/search-image/:query', async (req, res) => {
     const query = req.params.query;
     try {
-        if (PIXABAY_API_KEY && PIXABAY_API_KEY !== 'YOUR_PIXABAY_KEY') {
+        if (PIXABAY_API_KEY) {
             const pixabayRes = await axios.get(`https://pixabay.com/api/?key=${PIXABAY_API_KEY}&q=${encodeURIComponent(query)}&image_type=photo&per_page=3`);
             
             if (pixabayRes.data.hits && pixabayRes.data.hits.length > 0) {
@@ -199,7 +210,7 @@ try { db.exec(`ALTER TABLE products ADD COLUMN weight_options TEXT DEFAULT '1kg'
 try { db.exec(`ALTER TABLE orders ADD COLUMN delivery_slot TEXT;`); } catch (e) {}
 try { db.exec(`ALTER TABLE order_items ADD COLUMN weight TEXT;`); } catch (e) {}
 
-// ✅ FIXED: Only insert sample data if NO products exist AND it's a fresh database
+// Only insert sample data if NO products exist AND it's a fresh database
 const productCount = db.prepare('SELECT COUNT(*) as count FROM products').get();
 const orderCount = db.prepare('SELECT COUNT(*) as count FROM orders').get();
 
@@ -274,13 +285,18 @@ app.post('/api/admin/products/bulk', isAdmin, csvUpload.single('csvFile'), async
                 continue;
             }
             
+            let finalImageUrl = row.image_url || '';
+            if (finalImageUrl && (finalImageUrl.includes('pixabay') || finalImageUrl.includes('unsplash') || finalImageUrl.includes('imgur'))) {
+                finalImageUrl = await saveImageLocally(finalImageUrl, row.name);
+            }
+            
             const insert = db.prepare(`INSERT INTO products (name, description, price, stock, image_url, category, unit, weight_options) VALUES (?,?,?,?,?,?,?,?)`);
             const result = insert.run(
                 row.name.trim(),
                 row.description || '',
                 parseFloat(row.price),
                 parseInt(row.stock),
-                row.image_url || '',
+                finalImageUrl,
                 row.category || 'Vegetables',
                 row.unit || 'kg',
                 row.weight_options || '250g,500g,1kg'
@@ -304,9 +320,45 @@ app.post('/api/admin/products/bulk', isAdmin, csvUpload.single('csvFile'), async
     }
 });
 
+// Auto-fetch missing images for all products
+app.post('/api/admin/auto-fetch-missing-images', isAdmin, async (req, res) => {
+    const products = db.prepare(`SELECT id, name, image_url FROM products WHERE image_url IS NULL OR image_url = '' OR image_url LIKE '%placeholder%' OR image_url NOT LIKE '/product_images/%'`).all();
+    
+    let updated = 0;
+    let failed = 0;
+    
+    for (const product of products) {
+        try {
+            const pixabayRes = await axios.get(`https://pixabay.com/api/?key=${PIXABAY_API_KEY}&q=${encodeURIComponent(product.name)}&image_type=photo&per_page=1`);
+            
+            if (pixabayRes.data.hits && pixabayRes.data.hits.length > 0) {
+                const imageUrl = pixabayRes.data.hits[0].webformatURL;
+                const localPath = await saveImageLocally(imageUrl, product.name);
+                db.prepare(`UPDATE products SET image_url = ? WHERE id = ?`).run(localPath, product.id);
+                updated++;
+                console.log(`✅ Auto-fetched image for ${product.name}`);
+            } else {
+                failed++;
+            }
+        } catch (e) {
+            failed++;
+            console.log(`Failed to fetch image for ${product.name}:`, e.message);
+        }
+        
+        await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    
+    res.json({
+        success: true,
+        message: `Auto-fetched images for ${updated} products. Failed: ${failed}`,
+        updated: updated,
+        failed: failed
+    });
+});
+
 // ==================== CUSTOMER API ENDPOINTS ====================
 app.get('/api/products', (req, res) => {
-    const rows = db.prepare(`SELECT id, name, price, image_url, category, unit, weight_options FROM products`).all();
+    const rows = db.prepare(`SELECT id, name, price, stock, image_url, category, unit, weight_options FROM products`).all();
     res.json({ products: rows });
 });
 
@@ -357,7 +409,7 @@ app.get('/api/orders/:phone', (req, res) => {
 // ==================== ADMIN API ENDPOINTS ====================
 app.post('/admin/login', (req, res) => {
     const { password } = req.body;
-    if (password === 'Pass@6073') {
+    if (password === ADMIN_PASSWORD) {
         req.session.admin = true;
         return res.json({ success: true });
     }
@@ -474,11 +526,12 @@ app.get('/admin-page', (req, res) => {
     if (req.session && req.session.admin) {
         res.sendFile(path.join(__dirname, 'public', 'admin.html'));
     } else {
-        res.send(`<html><body><h2>Admin Login</h2><form id="login"><input type="password" id="pwd" placeholder="Password"><button type="submit">Login</button></form><script>document.getElementById('login').onsubmit=async(e)=>{e.preventDefault();let r=await fetch('/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:document.getElementById('pwd').value})});if(r.ok)location.reload();else alert('Wrong password');};<\/script></body></html>`);
+        res.send(`<html><body style="font-family:sans-serif;text-align:center;margin-top:100px"><h2>Admin Login</h2><form id="loginForm"><input type="password" id="pwd" placeholder="Enter password" /><button type="submit">Login</button></form><script>document.getElementById('loginForm').onsubmit=async(e)=>{e.preventDefault();const pwd=document.getElementById('pwd').value;const r=await fetch('/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pwd})});if(r.ok) location.reload();else alert('Wrong password');};<\/script></body></html>`);
     }
 });
 
 app.listen(PORT, HOST, () => {
     console.log(`✅ Veggie Shop running on http://${HOST}:${PORT}`);
-    console.log(`👉 Admin panel: http://${HOST}:${PORT}/admin-page (password: Pass@6073)`);
+    console.log(`👉 Admin panel: http://${HOST}:${PORT}/admin-page`);
+    console.log(`🔐 Admin password is set via environment variable (not shown here)`);
 });
