@@ -14,7 +14,9 @@
         .status-confirmed { background: #cce5ff; color: #004085; padding: 4px 8px; border-radius: 20px; font-size: 12px; display: inline-block; }
         .status-dispatched { background: #d4edda; color: #155724; padding: 4px 8px; border-radius: 20px; font-size: 12px; display: inline-block; }
         .status-delivered { background: #d1ecf1; color: #0c5460; padding: 4px 8px; border-radius: 20px; font-size: 12px; display: inline-block; }
-        .bulk-upload-section { margin-top: 30px; padding-top: 20px; border-top: 2px solid #4caf50; }
+        .bulk-upload-section, .bulk-image-section { margin-top: 20px; padding: 15px; border-radius: 12px; }
+        .bulk-upload-section { background: #e3f2fd; }
+        .bulk-image-section { background: #e8f5e9; }
         .image-preview { max-width: 50px; max-height: 50px; border-radius: 8px; }
     </style>
 </head>
@@ -28,6 +30,7 @@
 <h2>📝 Orders</h2>
 <div id="orders"></div>
 
+<!-- Add Product Section -->
 <div class="product-form">
     <h3>➕ Add New Product</h3>
     <input type="text" id="newName" placeholder="Product Name">
@@ -78,6 +81,16 @@
     <div id="bulkUploadResult" style="margin-top: 15px; display: none;"></div>
 </div>
 
+<!-- Bulk Image Fetch Section -->
+<div class="bulk-image-section">
+    <h3>🖼️ Bulk Auto-Fetch Images</h3>
+    <p style="margin-bottom: 10px;">Automatically search and add images for all products that don't have them.</p>
+    <button onclick="bulkFetchImages()" style="background: #9c27b0; color: white; padding: 10px 20px; border-radius: 30px; border: none; cursor: pointer;">
+        🚀 Fetch Missing Images for All Products
+    </button>
+    <div id="bulkImageResult" style="margin-top: 15px; display: none;"></div>
+</div>
+
 <script>
 let ordersData = [];
 
@@ -87,7 +100,8 @@ async function fetchAuth(url, opts={}) {
     return res.json();
 }
 
-// Auto-fetch image from product name
+// ==================== IMAGE FUNCTIONS ====================
+
 async function fetchProductImage() {
     const productName = document.getElementById('newName').value.trim();
     if (!productName) {
@@ -117,6 +131,24 @@ async function fetchProductImage() {
     }
 }
 
+async function uploadImage() {
+    const fileInput = document.getElementById('imageUpload');
+    const file = fileInput.files[0];
+    if (!file) return alert('Select an image first');
+    const formData = new FormData();
+    formData.append('image', file);
+    try {
+        const response = await fetch('/api/upload-image', { method: 'POST', body: formData });
+        const data = await response.json();
+        if (data.success) {
+            document.getElementById('newImageUrl').value = data.url;
+            alert('Image uploaded successfully!');
+        } else alert('Upload failed');
+    } catch (err) { alert('Upload error'); }
+}
+
+// ==================== PRODUCT FUNCTIONS ====================
+
 async function loadProducts() {
     let data = await fetchAuth('/api/admin/products');
     let html = `<table>
@@ -137,7 +169,11 @@ async function loadProducts() {
             <td><input id="weight${p.id}" value="${p.weight_options || '250g,500g,1kg'}" style="width:120px;"></td>
             <td><input id="cat${p.id}" value="${p.category || ''}"></td>
             <td>${p.image_url ? `<img src="${p.image_url}" class="image-preview" onerror="this.style.display='none'">` : 'No image'} <br><input id="img${p.id}" value="${p.image_url || ''}" style="width:150px;"></td>
-            <td><button onclick="updateProduct(${p.id})">Update</button> <button onclick="deleteProduct(${p.id})">Delete</button></td>
+            <td>
+                <button onclick="updateProduct(${p.id})">Update</button>
+                <button onclick="deleteProduct(${p.id})">Delete</button>
+                <button onclick="fetchSingleImage(${p.id}, '${p.name.replace(/'/g, "\\'")}')" style="background:#9c27b0; color:white; margin-left:5px;">🖼️ Fetch</button>
+            </td>
         </tr>`;
     });
     html += `</tbody>~`;
@@ -167,22 +203,6 @@ async function deleteProduct(id) {
     }
 }
 
-async function uploadImage() {
-    const fileInput = document.getElementById('imageUpload');
-    const file = fileInput.files[0];
-    if (!file) return alert('Select an image first');
-    const formData = new FormData();
-    formData.append('image', file);
-    try {
-        const response = await fetch('/api/upload-image', { method: 'POST', body: formData });
-        const data = await response.json();
-        if (data.success) {
-            document.getElementById('newImageUrl').value = data.url;
-            alert('Image uploaded successfully!');
-        } else alert('Upload failed');
-    } catch (err) { alert('Upload error'); }
-}
-
 async function addProduct() {
     let name = document.getElementById('newName').value.trim();
     let price = document.getElementById('newPrice').value;
@@ -208,6 +228,163 @@ async function addProduct() {
         loadProducts();
     } else alert('Failed to add product');
 }
+
+// ==================== BULK UPLOAD FUNCTIONS ====================
+
+document.getElementById('bulkUploadForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const fileInput = document.getElementById('csvFile');
+    const file = fileInput.files[0];
+    
+    if (!file) {
+        alert('Please select a CSV file');
+        return;
+    }
+    
+    if (!file.name.endsWith('.csv')) {
+        alert('Please upload a CSV file');
+        return;
+    }
+    
+    const formData = new FormData();
+    formData.append('csvFile', file);
+    
+    const resultDiv = document.getElementById('bulkUploadResult');
+    resultDiv.style.display = 'block';
+    resultDiv.innerHTML = '<div style="background:#fff3cd; padding:15px; border-radius:12px;">⏳ Uploading and processing... Please wait.</div>';
+    
+    try {
+        const response = await fetch('/api/admin/products/bulk', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            let html = `<div style="background:#d4edda; padding:15px; border-radius:12px;">
+                <strong>✅ ${data.message}</strong><br>`;
+            
+            if (data.inserted && data.inserted.length > 0) {
+                html += `<br><strong>Added Products:</strong><ul>`;
+                data.inserted.forEach(p => {
+                    html += `<li>#${p.id} - ${p.name}</li>`;
+                });
+                html += `</ul>`;
+            }
+            
+            if (data.errors && data.errors.length > 0) {
+                html += `<br><strong>⚠️ Errors:</strong><ul style="color:#856404;">`;
+                data.errors.forEach(err => {
+                    html += `<li>${err}</li>`;
+                });
+                html += `</ul>`;
+            }
+            
+            html += `</div>`;
+            resultDiv.innerHTML = html;
+            
+            loadProducts();
+            fileInput.value = '';
+        } else {
+            resultDiv.innerHTML = `<div style="background:#f8d7da; padding:15px; border-radius:12px;">
+                <strong>❌ Error:</strong> ${data.error || 'Upload failed'}
+            </div>`;
+        }
+    } catch (err) {
+        resultDiv.innerHTML = `<div style="background:#f8d7da; padding:15px; border-radius:12px;">
+            <strong>❌ Error:</strong> ${err.message}
+        </div>`;
+    }
+});
+
+// ==================== BULK IMAGE FETCH FUNCTIONS ====================
+
+async function bulkFetchImages() {
+    if (!confirm('This will search and add images for ALL products without images. Continue?')) {
+        return;
+    }
+    
+    const resultDiv = document.getElementById('bulkImageResult');
+    resultDiv.style.display = 'block';
+    resultDiv.innerHTML = '<div style="background:#fff3cd; padding:15px; border-radius:12px;">⏳ Fetching images for all products... This may take a few minutes.</div>';
+    
+    try {
+        const response = await fetch('/api/admin/bulk-fetch-images', {
+            method: 'POST'
+        });
+        const data = await response.json();
+        
+        if (data.success) {
+            let html = `<div style="background:#d4edda; padding:15px; border-radius:12px;">
+                <strong>✅ ${data.message}</strong><br>
+                Total products processed: ${data.total}<br>
+                Images fetched: ${data.updated}<br>
+                Failed: ${data.failed}<br><br>`;
+            
+            if (data.results && data.results.length > 0) {
+                html += `<details>
+                    <summary>View Details</summary>
+                    <ul style="margin-top:10px; max-height:200px; overflow-y:auto;">`;
+                
+                data.results.forEach(r => {
+                    if (r.status === 'success') {
+                        html += `<li style="color:green;">✅ ${r.name}</li>`;
+                    } else {
+                        html += `<li style="color:red;">❌ ${r.name} - ${r.reason}</li>`;
+                    }
+                });
+                
+                html += `</ul></details>`;
+            }
+            
+            html += `</div>`;
+            resultDiv.innerHTML = html;
+            
+            loadProducts();
+        } else {
+            resultDiv.innerHTML = `<div style="background:#f8d7da; padding:15px; border-radius:12px;">
+                <strong>❌ Error:</strong> ${data.error}
+            </div>`;
+        }
+    } catch (err) {
+        resultDiv.innerHTML = `<div style="background:#f8d7da; padding:15px; border-radius:12px;">
+            <strong>❌ Error:</strong> ${err.message}
+        </div>`;
+    }
+}
+
+async function fetchSingleImage(productId, productName) {
+    if (!confirm(`Fetch image for ${productName}?`)) return;
+    
+    const buttons = document.querySelectorAll(`button[onclick*="fetchSingleImage(${productId},"]`);
+    const button = buttons[0];
+    const originalText = button.textContent;
+    button.textContent = '⏳ Fetching...';
+    button.disabled = true;
+    
+    try {
+        const response = await fetch(`/api/admin/fetch-single-image/${productId}`, {
+            method: 'POST'
+        });
+        const data = await response.json();
+        
+        if (data.success) {
+            alert(`✅ ${data.message}`);
+            loadProducts();
+        } else {
+            alert(`❌ ${data.message}`);
+        }
+    } catch (err) {
+        alert('Error fetching image');
+    } finally {
+        button.textContent = originalText;
+        button.disabled = false;
+    }
+}
+
+// ==================== ORDER FUNCTIONS ====================
 
 async function loadOrders() {
     let orders = await fetchAuth('/api/admin/orders');
@@ -288,75 +465,7 @@ async function logout() {
     location.reload();
 }
 
-// Bulk upload handler
-document.getElementById('bulkUploadForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    
-    const fileInput = document.getElementById('csvFile');
-    const file = fileInput.files[0];
-    
-    if (!file) {
-        alert('Please select a CSV file');
-        return;
-    }
-    
-    if (!file.name.endsWith('.csv')) {
-        alert('Please upload a CSV file');
-        return;
-    }
-    
-    const formData = new FormData();
-    formData.append('csvFile', file);
-    
-    const resultDiv = document.getElementById('bulkUploadResult');
-    resultDiv.style.display = 'block';
-    resultDiv.innerHTML = '<div style="background:#fff3cd; padding:15px; border-radius:12px;">⏳ Uploading and processing... Please wait.</div>';
-    
-    try {
-        const response = await fetch('/api/admin/products/bulk', {
-            method: 'POST',
-            body: formData
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            let html = `<div style="background:#d4edda; padding:15px; border-radius:12px;">
-                <strong>✅ ${data.message}</strong><br>`;
-            
-            if (data.inserted && data.inserted.length > 0) {
-                html += `<br><strong>Added Products:</strong><ul>`;
-                data.inserted.forEach(p => {
-                    html += `<li>#${p.id} - ${p.name}</li>`;
-                });
-                html += `</ul>`;
-            }
-            
-            if (data.errors && data.errors.length > 0) {
-                html += `<br><strong>⚠️ Errors:</strong><ul style="color:#856404;">`;
-                data.errors.forEach(err => {
-                    html += `<li>${err}</li>`;
-                });
-                html += `</ul>`;
-            }
-            
-            html += `</div>`;
-            resultDiv.innerHTML = html;
-            
-            loadProducts();
-            fileInput.value = '';
-        } else {
-            resultDiv.innerHTML = `<div style="background:#f8d7da; padding:15px; border-radius:12px;">
-                <strong>❌ Error:</strong> ${data.error || 'Upload failed'}
-            </div>`;
-        }
-    } catch (err) {
-        resultDiv.innerHTML = `<div style="background:#f8d7da; padding:15px; border-radius:12px;">
-            <strong>❌ Error:</strong> ${err.message}
-        </div>`;
-    }
-});
-
+// ==================== INITIAL LOAD ====================
 loadProducts();
 loadOrders();
 setInterval(() => loadOrders(), 10000);
