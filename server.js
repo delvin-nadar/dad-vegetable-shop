@@ -149,25 +149,40 @@ app.get('/api/search-image/:query', async (req, res) => {
     }
 });
 
-// ==================== IMAGE UPLOAD ====================
-app.post('/api/upload-image', upload.single('image'), async (req, res) => {
+// Fetch single image for a product
+app.post('/api/admin/fetch-single-image/:id', isAdmin, async (req, res) => {
     try {
-        if (!req.file) return res.status(400).json({ success: false, error: 'No image file' });
+        const productId = req.params.id;
+        const product = db.prepare(`SELECT id, name FROM products WHERE id = ?`).get(productId);
         
-        const extension = req.file.originalname.split('.').pop();
-        const filename = `${Date.now()}_upload.${extension}`;
-        const localPath = `/product_images/${filename}`;
-        const filePath = path.join(__dirname, 'public', localPath);
+        if (!product) {
+            return res.status(404).json({ success: false, error: 'Product not found' });
+        }
         
-        fs.writeFileSync(filePath, req.file.buffer);
+        const searchQuery = encodeURIComponent(product.name);
+        const pixabayRes = await axios.get(`https://pixabay.com/api/?key=${PIXABAY_API_KEY}&q=${searchQuery}&image_type=photo&per_page=1`);
         
-        res.json({ success: true, url: localPath });
+        if (pixabayRes.data.hits && pixabayRes.data.hits.length > 0) {
+            const imageUrl = pixabayRes.data.hits[0].webformatURL;
+            const localPath = await saveImageLocally(imageUrl, product.name);
+            db.prepare(`UPDATE products SET image_url = ? WHERE id = ?`).run(localPath, productId);
+            
+            res.json({
+                success: true,
+                message: `Image fetched for ${product.name}`,
+                imageUrl: localPath
+            });
+        } else {
+            res.json({
+                success: false,
+                message: `No image found for ${product.name} on Pixabay`
+            });
+        }
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ success: false, error: 'Upload failed' });
+        console.error('Single fetch error:', error);
+        res.status(500).json({ success: false, error: error.message });
     }
 });
-
 // ==================== DATABASE SETUP ====================
 const db = new Database('./vegetable_shop.db');
 
