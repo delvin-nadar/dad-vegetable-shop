@@ -233,22 +233,22 @@
 
     // Load products with cache busting
     async function loadProducts() {
-        try {
-            // Add timestamp to prevent caching
-            const res = await fetch('/api/products?_=' + Date.now(), {
-                cache: 'no-store',
-                headers: {
-                    'Cache-Control': 'no-cache',
-                    'Pragma': 'no-cache'
-                }
-            });
-            const data = await res.json();
-            allProducts = data.products;
-            renderProducts(allProducts);
-        } catch (err) {
-            productsContainer.innerHTML = '<p>Error loading veggies. Please refresh.</p>';
-        }
+    try {
+        // Add timestamp to prevent caching
+        const res = await fetch('/api/products?_=' + Date.now(), {
+            cache: 'no-store',
+            headers: {
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache'
+            }
+        });
+        const data = await res.json();
+        allProducts = data.products;
+        renderProducts(allProducts);
+    } catch (err) {
+        productsContainer.innerHTML = '<p>Error loading veggies. Please refresh.</p>';
     }
+}
 
     function getCartQuantity(productId) {
         const item = cart.find(item => item.productId === productId);
