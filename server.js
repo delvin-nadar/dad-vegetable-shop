@@ -1,500 +1,393 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>Dad's Fresh Veggies - Organic Vegetable Shop</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif; }
-        body { background: #f8f9fa; color: #2d3e2b; }
-        
-        .navbar { background: #2e7d32; color: white; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-        .logo h2 { font-size: 1.8rem; letter-spacing: 1px; }
-        .logo p { font-size: 0.8rem; opacity: 0.9; }
-        .cart-icon { background: #ffb74d; padding: 0.5rem 1rem; border-radius: 40px; cursor: pointer; font-weight: bold; display: flex; gap: 8px; align-items: center; transition: 0.2s; }
-        .cart-icon:hover { background: #ffa726; transform: scale(1.02); }
-        .admin-link { background: #ffd966; padding: 0.3rem 0.9rem; border-radius: 30px; text-decoration: none; color: #2d3e2b; font-weight: bold; }
-        
-        .container { max-width: 1300px; margin: 2rem auto; padding: 0 1.5rem; }
-        
-        .products-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1.8rem; margin-top: 1rem; }
-        .product-card { background: white; border-radius: 24px; overflow: hidden; box-shadow: 0 8px 20px rgba(0,0,0,0.05); transition: 0.2s; padding: 1rem; text-align: center; border: 1px solid #e9f0e6; position: relative; }
-        .product-card:hover { transform: translateY(-5px); box-shadow: 0 15px 30px rgba(0,0,0,0.1); }
-        .product-img { width: 100%; height: 150px; object-fit: cover; border-radius: 18px; background: #eef2e6; }
-        .product-name { font-size: 1.4rem; font-weight: 700; margin: 0.7rem 0 0.3rem; }
-        .product-price { font-size: 1.3rem; color: #2e7d32; font-weight: bold; }
-        .product-category { font-size: 12px; color: #666; background: #f0f0f0; padding: 2px 8px; border-radius: 20px; display: inline-block; margin: 5px 0; }
-        .stock-badge { font-size: 0.75rem; background: #f1f8e9; display: inline-block; padding: 0.2rem 0.8rem; border-radius: 30px; margin: 0.5rem 0; }
-        .add-btn { background: #2e7d32; color: white; border: none; padding: 0.6rem 1.2rem; border-radius: 40px; font-weight: bold; cursor: pointer; margin-top: 0.6rem; transition: 0.2s; width: 100%; }
-        .add-btn:disabled { background: #aaa; cursor: not-allowed; }
-        .add-btn:hover:not(:disabled) { background: #1b5e20; }
-        .add-btn.in-cart { background: #ff9800; }
-        .added-to-cart-badge { position: absolute; top: 10px; right: 10px; background: #ff9800; color: white; padding: 4px 8px; border-radius: 20px; font-size: 10px; font-weight: bold; }
-        .weight-select { width: 100%; padding: 8px; margin: 8px 0; border-radius: 20px; border: 1px solid #ccc; background: white; cursor: pointer; }
-        
-        .cart-sidebar { position: fixed; top: 0; right: -400px; width: 380px; height: 100%; background: white; box-shadow: -5px 0 20px rgba(0,0,0,0.2); z-index: 1000; transition: 0.3s; padding: 1.5rem; overflow-y: auto; display: flex; flex-direction: column; }
-        .cart-sidebar.open { right: 0; }
-        .cart-header { display: flex; justify-content: space-between; font-size: 1.5rem; font-weight: bold; border-bottom: 2px solid #e0e0e0; padding-bottom: 0.8rem; }
-        .close-cart { cursor: pointer; font-size: 1.8rem; }
-        .cart-items { flex: 1; margin: 1rem 0; }
-        .cart-item { display: flex; justify-content: space-between; margin-bottom: 1rem; border-bottom: 1px dashed #ddd; padding-bottom: 0.6rem; }
-        .cart-total { font-size: 1.3rem; font-weight: bold; border-top: 2px solid #ccc; padding-top: 0.8rem; text-align: right; }
-        .checkout-btn { background: #ff9800; width: 100%; padding: 0.8rem; border: none; border-radius: 50px; font-weight: bold; font-size: 1rem; margin-top: 1rem; cursor: pointer; }
-        
-        .order-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; width: 90%; max-width: 500px; z-index: 1100; border-radius: 28px; padding: 1.8rem; display: none; box-shadow: 0 20px 35px rgba(0,0,0,0.2); }
-        .order-modal.open { display: block; }
-        .order-modal input, .order-modal textarea, .order-modal select { width: 100%; padding: 0.7rem; margin: 0.5rem 0; border: 1px solid #ccc; border-radius: 20px; }
-        .qr-area { text-align: center; margin: 1rem 0; }
-        .payment-note { background: #e8f5e9; padding: 12px; border-radius: 16px; text-align: center; margin: 15px 0; font-size: 14px; border-left: 4px solid #4caf50; }
-        
-        .overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 999; display: none; }
-        .overlay.active { display: block; }
-        
-        .order-tracking { margin: 20px 0; padding: 15px; background: #f5f5f5; border-radius: 16px; }
-        .order-tracking input { width: 250px; display: inline-block; margin-right: 10px; }
-        .track-result-card { background: #e8f5e9; padding: 15px; border-radius: 12px; margin-bottom: 10px; }
-        .status-badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; }
-        .status-pending { background: #fff3cd; color: #856404; }
-        .status-confirmed { background: #cce5ff; color: #004085; }
-        .status-dispatched { background: #d4edda; color: #155724; }
-        .status-delivered { background: #d1ecf1; color: #0c5460; }
-        .delivery-info, .shop-location, .bulk-order-note { margin: 15px 0; }
-        .whatsapp-float { position: fixed; bottom: 20px; right: 20px; background-color: #25D366; color: white; border-radius: 50px; padding: 12px 20px; text-decoration: none; font-weight: bold; box-shadow: 2px 2px 5px rgba(0,0,0,0.3); z-index: 1000; display: flex; align-items: center; gap: 8px; }
-        footer { text-align: center; margin-top: 3rem; padding: 1.5rem; background: #eaf7e1; }
-        
-        @media (max-width: 700px) {
-            .cart-sidebar { width: 100%; right: -100%; }
-            .order-tracking input { width: 100%; margin-bottom: 10px; }
-        }
-    </style>
-</head>
-<body>
+const express = require('express');
+const sqlite3 = require('sqlite3').verbose();
+const path = require('path');
+const session = require('express-session');
+const QRCode = require('qrcode');
+const bodyParser = require('body-parser');
+const multer = require('multer');
+const upload = multer({ storage: multer.memoryStorage() });
+const axios = require('axios');
+const FormData = require('form-data');
+const csv = require('csv-parser');
+const fs = require('fs');
 
-<div class="navbar">
-    <div class="logo">
-        <h2>🥬 Dad's Veggie Shop</h2>
-        <p>Farm fresh • Chemical free</p>
-    </div>
-    <div style="display: flex; gap: 15px; align-items: center;">
-        <a href="/admin-page" class="admin-link" target="_blank">📦 Admin Panel</a>
-        <div class="cart-icon" id="cartIcon">
-            🛒 Cart (<span id="cartCount">0</span>)
-        </div>
-    </div>
-</div>
+const app = express();
+const PORT = process.env.PORT || 3000;
+const HOST = '0.0.0.0';
 
-<div class="container">
-    <div class="delivery-info" style="font-size:14px; background:#e8f5e9; padding:10px; border-radius:16px;">
-        📦 Free delivery above ₹100 | Flat ₹30 below ₹100
-    </div>
-    <div class="bulk-order-note" style="background:#fff3cd; padding:10px; border-radius:8px; margin:10px 0; text-align:center;">
-        🍽️ <strong>We take bulk orders for Caterers/Restaurants</strong> — Contact us for wholesale pricing!
-    </div>
-    
-    <div class="order-tracking">
-        <h3>🔍 Track Your Orders</h3>
-        <input type="tel" id="trackPhone" placeholder="Enter 10-digit Mobile Number" maxlength="10">
-        <button onclick="trackOrders()" style="background:#2e7d32; color:white; padding:8px 20px; border-radius:40px;">Track Orders</button>
-        <div id="trackResult" style="margin-top:15px;"></div>
-    </div>
-    
-    <div class="category-filters" style="margin:20px 0; text-align:center; display:flex; flex-wrap:wrap; gap:10px; justify-content:center;">
-        <button onclick="filterProducts('all')" style="background:#e0e0e0; border:none; padding:8px 16px; border-radius:30px; cursor:pointer;">All</button>
-        <button onclick="filterProducts('Vegetables')" style="background:#e0e0e0; border:none; padding:8px 16px; border-radius:30px; cursor:pointer;">🥬 Fresh Produce</button>
-        <button onclick="filterProducts('Masala Powders')" style="background:#e0e0e0; border:none; padding:8px 16px; border-radius:30px; cursor:pointer;">🌶️ Masala Powders</button>
-        <button onclick="filterProducts('South Indian')" style="background:#e0e0e0; border:none; padding:8px 16px; border-radius:30px; cursor:pointer;">🍛 South Indian</button>
-        <button onclick="filterProducts('Dry Groceries')" style="background:#e0e0e0; border:none; padding:8px 16px; border-radius:30px; cursor:pointer;">🍚 Dry Groceries</button>
-    </div>
-    
-    <div id="productsContainer" class="products-grid">Loading vegetables...</div>
-</div>
+// ==================== SECURE ADMIN PASSWORD ====================
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 
-<div class="cart-sidebar" id="cartSidebar">
-    <div class="cart-header">
-        <span>Your Cart</span>
-        <span class="close-cart" id="closeCartBtn">&times;</span>
-    </div>
-    <div id="cartItemsList" class="cart-items">Cart is empty</div>
-    <div class="cart-total">Subtotal: ₹<span id="cartSubtotal">0</span></div>
-    <div class="delivery-charge" style="text-align:right;">Delivery: ₹<span id="deliveryCharge">0</span></div>
-    <div class="cart-total">Total: ₹<span id="cartTotalAmount">0</span></div>
-    <button class="checkout-btn" id="checkoutBtn">🛍️ Proceed to Checkout</button>
-</div>
+if (!ADMIN_PASSWORD) {
+    console.error('❌ FATAL ERROR: ADMIN_PASSWORD environment variable is not set!');
+    console.error('👉 Please set ADMIN_PASSWORD in Render dashboard -> Environment Variables');
+    process.exit(1);
+}
 
-<div class="overlay" id="overlay"></div>
+app.use(bodyParser.json());
+app.use(express.static(path.join(__dirname, 'public')));
+app.use('/product_images', express.static(path.join(__dirname, 'public', 'product_images')));
+app.use(session({ secret: 'dadveggie123', resave: false, saveUninitialized: true, cookie: { secure: false } }));
 
-<div class="order-modal" id="orderModal">
-    <h3>📝 Delivery Details</h3>
-    <input type="text" id="customerName" placeholder="Full Name" required>
-    <input type="tel" id="customerPhone" placeholder="10-digit Mobile Number" maxlength="10" required>
-    <textarea id="customerAddress" rows="2" placeholder="Delivery Address"></textarea>
-    <div class="delivery-slots">
-        <label>📅 Delivery Slots:</label>
-        <select id="deliverySlot">
-            <option value="">Select a slot</option>
-            <option value="Morning (8-10 AM)">Morning (8-10 AM)</option>
-            <option value="Evening (8-10 PM)">Evening (8-10 PM)</option>
-        </select>
-    </div>
-    
-    <div id="qrPaymentSection" style="display: none;">
-        <div class="qr-area">
-            <img id="qrCodeImg" style="width: 180px; height: 180px; border-radius: 20px;">
-            <p style="margin-top:10px;">or</p>
-            <button id="payWithAppBtn" style="background:#2e7d32; color:white; padding:10px; border-radius:40px; width:100%;">📱 Pay with UPI App</button>
-        </div>
-        <p style="text-align:center;">Scan QR or click above to pay.<br>Order ID: <strong id="orderIdSpan"></strong><br>Amount: ₹<span id="orderAmountSpan"></span></p>
-        <div class="payment-note">
-            💡 <strong>Once payment is done, close this window.</strong><br>
-            Your order will be placed automatically!
-        </div>
-        <button id="closeModalBtn" style="background:#4caf50; padding:0.8rem; width:100%; border:none; border-radius:40px; color:white; font-weight:bold; cursor:pointer;">✓ I have completed payment - Close</button>
-    </div>
-    
-    <div id="checkoutFormSection">
-        <button id="placeOrderBtn" class="checkout-btn">Place Order & Get QR</button>
-    </div>
-</div>
+// Create uploads directory
+const uploadsDir = path.join(__dirname, 'public', 'product_images');
+if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+}
 
-<div class="shop-location" style="text-align:center; margin:20px 0;">
-    📍 Our Shop: <a href="https://share.google/eUozOVKELli8hQiJ8" target="_blank">View on Map</a>
-</div>
+// ==================== DATABASE SETUP ====================
+const db = new sqlite3.Database('./vegetable_shop.db');
 
-<footer>
-    🧾 Fresh vegetables delivered | UPI QR payment | Dad's Shop since 1995
-</footer>
+db.serialize(() => {
+    db.run(`CREATE TABLE IF NOT EXISTS products (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        description TEXT,
+        price REAL NOT NULL,
+        stock INTEGER NOT NULL DEFAULT 0,
+        image_url TEXT,
+        category TEXT,
+        unit TEXT DEFAULT 'kg',
+        weight_options TEXT DEFAULT '1kg'
+    )`);
 
-<a href="https://wa.me/919029186608?text=Hi%2C%20I%20want%20to%20place%20an%20order" class="whatsapp-float" target="_blank">💬 WhatsApp us</a>
+    db.run(`CREATE TABLE IF NOT EXISTS orders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_name TEXT NOT NULL,
+        customer_phone TEXT NOT NULL,
+        customer_address TEXT NOT NULL,
+        total_amount REAL NOT NULL,
+        payment_status TEXT DEFAULT 'pending',
+        order_status TEXT DEFAULT 'pending',
+        delivery_slot TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
 
-<script>
-    let allProducts = [];
-    let cart = [];
-    let currentFilter = 'all';
-    let currentUpiIntentUrl = '';
-    let backPressCount = 0;
-    let backPressTimer = null;
+    db.run(`CREATE TABLE IF NOT EXISTS order_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id INTEGER,
+        product_id INTEGER,
+        quantity INTEGER,
+        price REAL,
+        weight TEXT,
+        FOREIGN KEY(order_id) REFERENCES orders(id),
+        FOREIGN KEY(product_id) REFERENCES products(id)
+    )`);
 
-    const productsContainer = document.getElementById('productsContainer');
-    const cartSidebar = document.getElementById('cartSidebar');
-    const overlay = document.getElementById('overlay');
-    const orderModal = document.getElementById('orderModal');
-
-    window.addEventListener('popstate', function() {
-        if (cartSidebar.classList.contains('open')) {
-            cartSidebar.classList.remove('open');
-            overlay.classList.remove('active');
-            history.pushState(null, null, window.location.href);
-        } else if (orderModal.classList.contains('open')) {
-            orderModal.classList.remove('open');
-            overlay.classList.remove('active');
-            history.pushState(null, null, window.location.href);
-        } else {
-            if (backPressCount === 0) {
-                backPressCount++;
-                if (confirm('Do you want to exit the app?')) {
-                    window.close();
-                    history.back();
-                } else {
-                    backPressCount = 0;
-                    history.pushState(null, null, window.location.href);
-                }
-                backPressTimer = setTimeout(() => { backPressCount = 0; }, 2000);
-            } else {
-                window.close();
-                history.back();
+    // Insert sample products if none exist
+    db.get(`SELECT COUNT(*) as count FROM products`, (err, row) => {
+        if (row.count === 0) {
+            const veggies = [
+                ['Tomato', 'Fresh red tomatoes', 40, 100, 'https://cdn.pixabay.com/photo/2020/06/01/13/55/tomatoes-5247827_640.jpg', 'Vegetables', 'kg', '250g,500g,1kg'],
+                ['Potato', 'Farm potatoes', 30, 100, 'https://cdn.pixabay.com/photo/2016/08/11/08/04/potatoes-1585075_640.jpg', 'Vegetables', 'kg', '250g,500g,1kg'],
+                ['Onion', 'Red onion', 35, 100, 'https://cdn.pixabay.com/photo/2020/07/15/20/38/onion-5409359_640.jpg', 'Vegetables', 'kg', '250g,500g,1kg'],
+                ['Carrot', 'Organic carrots', 45, 100, 'https://cdn.pixabay.com/photo/2017/06/23/06/04/carrots-2433439_640.jpg', 'Vegetables', 'kg', '250g,500g,1kg'],
+                ['Spinach', 'Fresh spinach bunch', 25, 100, 'https://cdn.pixabay.com/photo/2016/03/26/16/44/spinach-1280831_640.jpg', 'Vegetables', 'bunch', '1,2,3,4,5,6,7,8,9,10,11,12,13,14,15'],
+                ['Cucumber', 'Crisp cucumber', 35, 100, 'https://cdn.pixabay.com/photo/2016/07/24/17/33/cucumber-1538652_640.jpg', 'Vegetables', 'piece', '1,2,3,4,5,6,7,8,9,10,11,12,13,14,15']
+            ];
+            const stmt = db.prepare(`INSERT INTO products (name, description, price, stock, image_url, category, unit, weight_options) VALUES (?,?,?,?,?,?,?,?)`);
+            for (const v of veggies) {
+                stmt.run(v);
             }
+            stmt.finalize();
+            console.log('✅ Sample products inserted.');
         }
     });
-    history.pushState(null, null, window.location.href);
+});
 
-    function validatePhone(phone) { return /^\d{10}$/.test(phone); }
-    function calculateDelivery(totalAmount) { return totalAmount >= 100 ? 0 : 30; }
-
-    async function loadProducts() {
-        try {
-            const res = await fetch('/api/products?_=' + Date.now(), {
-                cache: 'no-store',
-                headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
-            });
-            const data = await res.json();
-            allProducts = data.products;
-            renderProducts(allProducts);
-        } catch (err) {
-            productsContainer.innerHTML = '<p>Error loading veggies. Please refresh.</p>';
-        }
-    }
-
-    function getCartQuantity(productId) {
-        const item = cart.find(item => item.productId === productId);
-        return item ? item.quantity : 0;
-    }
-
-    function renderProducts(productsToRender) {
-        if (!productsToRender.length) {
-            productsContainer.innerHTML = '<p>No vegetables available currently. Check back later!</p>';
-            return;
-        }
-        
-        const cacheBuster = Date.now();
-        
-        productsContainer.innerHTML = productsToRender.map(p => {
-            const inCartQty = getCartQuantity(p.id);
-            const inCart = inCartQty > 0;
-            const unitDisplay = p.unit || 'kg';
-            
-            let weightHtml = '';
-            if (unitDisplay === 'kg') {
-                weightHtml = `<select class="weight-select" data-id="${p.id}" data-price="${p.price}" data-unit="kg">
-                    <option value="" disabled selected>-- Select Weight --</option>
-                    <option value="250g">250g - ₹${(p.price * 0.25).toFixed(2)}</option>
-                    <option value="500g">500g - ₹${(p.price * 0.5).toFixed(2)}</option>
-                    <option value="1kg">1kg - ₹${p.price}</option>
-                </select>`;
-            } else if (unitDisplay === 'piece' || unitDisplay === 'bunch' || unitDisplay === 'packet') {
-                let options = '<option value="" disabled selected>-- Select Quantity --</option>';
-                for (let i = 1; i <= 15; i++) {
-                    options += `<option value="${i}">${i} ${unitDisplay}${i > 1 ? 's' : ''} - ₹${(p.price * i).toFixed(2)}</option>`;
-                }
-                weightHtml = `<select class="weight-select" data-id="${p.id}" data-price="${p.price}" data-unit="${unitDisplay}">
-                    ${options}
-                </select>`;
-            }
-            
-            // Use the image URL from database or fallback to Pixabay tomato
-            const imageUrl = p.image_url ? `${p.image_url}?t=${cacheBuster}` : 'https://cdn.pixabay.com/photo/2020/06/01/13/55/tomatoes-5247827_640.jpg';
-            
-            return `
-                <div class="product-card">
-                    ${inCart ? '<div class="added-to-cart-badge">✓ Added to Cart</div>' : ''}
-                    <img class="product-img" src="${imageUrl}" alt="${p.name}">
-                    <div class="product-name">${p.name}</div>
-                    <div class="product-price">₹${p.price}/${unitDisplay}</div>
-                    <div class="product-category">${p.category || 'Vegetables'}</div>
-                    <div class="stock-badge">${p.stock > 0 ? `In stock: ${p.stock} ${unitDisplay}` : 'Out of stock'}</div>
-                    ${weightHtml}
-                    <button class="add-btn ${inCart ? 'in-cart' : ''}" data-id="${p.id}" data-name="${p.name}" data-price="${p.price}" data-unit="${unitDisplay}" data-stock="${p.stock}">
-                        ${inCart ? `✓ Added (${inCartQty})` : 'Add to Cart'}
-                    </button>
-                </div>
-            `;
-        }).join('');
-
-        document.querySelectorAll('.add-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const id = parseInt(btn.dataset.id);
-                const name = btn.dataset.name;
-                const basePrice = parseFloat(btn.dataset.price);
-                const unit = btn.dataset.unit;
-                const stock = parseInt(btn.dataset.stock);
-                const weightSelect = document.querySelector(`.weight-select[data-id="${id}"]`);
-                const selectedWeight = weightSelect ? weightSelect.value : null;
-                
-                if (!selectedWeight || selectedWeight === '') {
-                    alert('Please select weight/quantity first');
-                    return;
-                }
-                
-                let price = basePrice;
-                if (unit === 'kg') {
-                    if (selectedWeight === '250g') price = basePrice * 0.25;
-                    else if (selectedWeight === '500g') price = basePrice * 0.5;
-                    else price = basePrice;
-                } else {
-                    const qty = parseInt(selectedWeight);
-                    price = basePrice * qty;
-                }
-                
-                const existing = cart.find(item => item.productId === id && item.weight === selectedWeight);
-                const currentQty = existing ? existing.quantity : 0;
-                if (currentQty + 1 > stock) {
-                    alert(`Only ${stock} ${unit} available!`);
-                    return;
-                }
-                
-                if (existing) {
-                    existing.quantity += 1;
-                } else {
-                    cart.push({ productId: id, name, price, quantity: 1, weight: selectedWeight, unit });
-                }
-                updateCartUI();
-                renderProducts(allProducts);
-            });
+// Helper: Promisify db.get
+function dbGet(sql, params = []) {
+    return new Promise((resolve, reject) => {
+        db.get(sql, params, (err, row) => {
+            if (err) reject(err);
+            else resolve(row);
         });
-    }
-
-    function updateCartUI() {
-        const subtotal = cart.reduce((sum, i) => sum + (i.price * i.quantity), 0);
-        const delivery = calculateDelivery(subtotal);
-        const total = subtotal + delivery;
-        document.getElementById('cartCount').innerText = cart.reduce((sum, i) => sum + i.quantity, 0);
-        document.getElementById('cartSubtotal').innerText = subtotal.toFixed(2);
-        document.getElementById('deliveryCharge').innerText = delivery;
-        document.getElementById('cartTotalAmount').innerText = total.toFixed(2);
-        if (cart.length === 0) {
-            document.getElementById('cartItemsList').innerHTML = 'Cart is empty 🛒';
-            return;
-        }
-        document.getElementById('cartItemsList').innerHTML = cart.map((item, idx) => `
-            <div class="cart-item">
-                <span>${item.name} (${item.weight}) x${item.quantity}</span>
-                <span>₹${(item.price * item.quantity).toFixed(2)} 
-                    <button style="background:#e53935; border:none; color:white; border-radius:30px; padding:2px 10px; margin-left:8px; cursor:pointer;" data-idx="${idx}">Remove</button>
-                </span>
-            </div>
-        `).join('');
-        document.querySelectorAll('.cart-item button').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const idx = parseInt(btn.dataset.idx);
-                cart.splice(idx, 1);
-                updateCartUI();
-                renderProducts(allProducts);
-            });
-        });
-    }
-
-    function filterProducts(category) {
-        currentFilter = category;
-        if (category === 'all') {
-            renderProducts(allProducts);
-        } else {
-            const filtered = allProducts.filter(p => p.category === category);
-            renderProducts(filtered);
-        }
-    }
-    window.filterProducts = filterProducts;
-
-    document.getElementById('cartIcon').onclick = () => {
-        cartSidebar.classList.add('open');
-        overlay.classList.add('active');
-    };
-    document.getElementById('closeCartBtn').onclick = () => {
-        cartSidebar.classList.remove('open');
-        overlay.classList.remove('active');
-    };
-    overlay.onclick = () => {
-        cartSidebar.classList.remove('open');
-        overlay.classList.remove('active');
-        orderModal.classList.remove('open');
-    };
-
-    document.getElementById('checkoutBtn').onclick = () => {
-        if (cart.length === 0) {
-            alert('Your cart is empty! Add some veggies.');
-            return;
-        }
-        orderModal.classList.add('open');
-        overlay.classList.add('active');
-        document.getElementById('qrPaymentSection').style.display = 'none';
-        document.getElementById('checkoutFormSection').style.display = 'block';
-    };
-
-    document.getElementById('placeOrderBtn').onclick = async () => {
-        const name = document.getElementById('customerName').value.trim();
-        const phone = document.getElementById('customerPhone').value.trim();
-        const address = document.getElementById('customerAddress').value.trim();
-        const deliverySlot = document.getElementById('deliverySlot').value;
-        
-        if (!name) return alert('Please enter your name');
-        if (!validatePhone(phone)) return alert('Please enter a valid 10-digit mobile number');
-        if (!address) return alert('Please enter delivery address');
-        if (!deliverySlot) return alert('Please select a delivery slot');
-        
-        const subtotal = cart.reduce((s, i) => s + i.price * i.quantity, 0);
-        const deliveryCharge = calculateDelivery(subtotal);
-        const totalAmount = subtotal + deliveryCharge;
-        
-        const placeBtn = document.getElementById('placeOrderBtn');
-        placeBtn.textContent = 'Processing...';
-        placeBtn.disabled = true;
-        
-        const payload = {
-            customerName: name,
-            customerPhone: phone,
-            customerAddress: address,
-            deliverySlot: deliverySlot,
-            items: cart.map(i => ({ productId: i.productId, quantity: i.quantity, price: i.price, weight: i.weight })),
-            totalAmount: totalAmount
-        };
-        
-        try {
-            const res = await fetch('/api/orders', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            const data = await res.json();
-            if (!res.ok) return alert(data.error);
-            
-            alert(`✅ Order Confirmed!\n\nOrder ID: ${data.orderId}\nTotal: ₹${data.totalAmount}\n\nYou can pay now using the QR code.`);
-            
-            currentUpiIntentUrl = data.upiIntentUrl;
-            document.getElementById('orderIdSpan').innerText = data.orderId;
-            document.getElementById('orderAmountSpan').innerText = data.totalAmount;
-            document.getElementById('qrCodeImg').src = data.qrCodeDataURL;
-            document.getElementById('qrPaymentSection').style.display = 'block';
-            document.getElementById('checkoutFormSection').style.display = 'none';
-            
-            cart = [];
-            updateCartUI();
-            renderProducts(allProducts);
-        } catch (err) {
-            alert('Network error. Could not place order');
-        } finally {
-            placeBtn.textContent = 'Place Order & Get QR';
-            placeBtn.disabled = false;
-        }
-    };
-
-    document.getElementById('closeModalBtn').onclick = () => {
-        orderModal.classList.remove('open');
-        overlay.classList.remove('active');
-        alert('✅ Your order has been placed successfully!\n\nYou will receive updates on WhatsApp.\n\nThank you for shopping with us! 🥬');
-    };
-
-    document.getElementById('payWithAppBtn')?.addEventListener('click', () => {
-        if (currentUpiIntentUrl) {
-            window.location.href = currentUpiIntentUrl;
-        }
     });
+}
 
-    window.trackOrders = async function() {
-        const phone = document.getElementById('trackPhone').value.trim();
-        if (!validatePhone(phone)) return alert('Please enter a valid 10-digit mobile number');
-        
-        try {
-            const res = await fetch(`/api/orders/${phone}`);
-            const data = await res.json();
-            if (data.error) return alert(data.error);
-            
-            const statusMap = {
-                'pending': { text: '⏳ Pending Payment', class: 'status-pending' },
-                'confirmed': { text: '✅ Payment Confirmed - Preparing Order', class: 'status-confirmed' },
-                'dispatched': { text: '🚚 Order Dispatched - On the Way!', class: 'status-dispatched' },
-                'delivered': { text: '🎉 Delivered! Enjoy Your Vegetables', class: 'status-delivered' }
-            };
-            
-            let html = `<h4>📋 Your Orders (${data.length})</h4>`;
-            data.forEach(order => {
-                const status = statusMap[order.order_status] || { text: order.order_status, class: 'status-pending' };
-                html += `
-                    <div class="track-result-card">
-                        <strong>Order #${order.id}</strong><br>
-                        <span class="status-badge ${status.class}">${status.text}</span><br>
-                        Payment: ${order.payment_status === 'paid' ? '✅ Paid' : '⏳ Awaiting Payment'}<br>
-                        Total: ₹${order.total_amount}<br>
-                        Delivery Slot: ${order.delivery_slot || 'Not selected'}<br>
-                        Date: ${new Date(order.created_at).toLocaleDateString()}
-                    </div>
-                `;
-            });
-            document.getElementById('trackResult').innerHTML = html;
-        } catch (err) {
-            alert('Error tracking orders');
+function dbAll(sql, params = []) {
+    return new Promise((resolve, reject) => {
+        db.all(sql, params, (err, rows) => {
+            if (err) reject(err);
+            else resolve(rows);
+        });
+    });
+}
+
+function dbRun(sql, params = []) {
+    return new Promise((resolve, reject) => {
+        db.run(sql, params, function(err) {
+            if (err) reject(err);
+            else resolve({ lastID: this.lastID });
+        });
+    });
+}
+
+function isAdmin(req, res, next) {
+    if (req.session && req.session.admin) return next();
+    else return res.status(401).json({ error: 'Unauthorized' });
+}
+
+// ==================== CUSTOMER API ENDPOINTS ====================
+app.get('/api/products', async (req, res) => {
+    try {
+        const rows = await dbAll(`SELECT id, name, price, stock, image_url, category, unit, weight_options FROM products`);
+        res.json({ products: rows });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/orders', async (req, res) => {
+    const { customerName, customerPhone, customerAddress, items, deliverySlot, totalAmount } = req.body;
+    if (!items || items.length === 0) return res.status(400).json({ error: 'No items' });
+    
+    try {
+        // Check stock
+        for (let item of items) {
+            const prod = await dbGet(`SELECT stock FROM products WHERE id = ?`, [item.productId]);
+            if (!prod || prod.stock < item.quantity) {
+                return res.status(400).json({ error: `Insufficient stock for product ID ${item.productId}` });
+            }
         }
-    };
+        
+        const total = totalAmount || items.reduce((s, i) => s + i.price * i.quantity, 0);
+        const orderResult = await dbRun(
+            `INSERT INTO orders (customer_name, customer_phone, customer_address, total_amount, delivery_slot) VALUES (?,?,?,?,?)`,
+            [customerName, customerPhone, customerAddress, total, deliverySlot || null]
+        );
+        const orderId = orderResult.lastID;
+        
+        for (let it of items) {
+            await dbRun(
+                `INSERT INTO order_items (order_id, product_id, quantity, price, weight) VALUES (?,?,?,?,?)`,
+                [orderId, it.productId, it.quantity, it.price, it.weight || null]
+            );
+        }
+        
+        const UPI_ID = "9029186608@okbizaxis";
+        const upiUrl = `upi://pay?pa=${UPI_ID}&pn=Dad%20Veg%20Shop&am=${total}&cu=INR&tn=Order%20${orderId}`;
+        QRCode.toDataURL(upiUrl, (err, qrDataUrl) => {
+            if (err) return res.json({ orderId, totalAmount: total, qrCodeDataURL: null, upiIntentUrl: upiUrl });
+            res.json({ orderId, totalAmount: total, qrCodeDataURL: qrDataUrl, upiIntentUrl: upiUrl });
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
 
-    loadProducts();
-    updateCartUI();
-</script>
-</body>
-</html>
+app.get('/api/orders/:phone', async (req, res) => {
+    try {
+        const orders = await dbAll(
+            `SELECT id, order_status, payment_status, total_amount, delivery_slot, created_at FROM orders WHERE customer_phone = ? ORDER BY id DESC`,
+            [req.params.phone]
+        );
+        if (!orders || orders.length === 0) return res.status(404).json({ error: 'No orders found for this number' });
+        res.json(orders);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ==================== ADMIN API ENDPOINTS ====================
+app.post('/admin/login', (req, res) => {
+    const { password } = req.body;
+    if (password === ADMIN_PASSWORD) {
+        req.session.admin = true;
+        return res.json({ success: true });
+    }
+    res.status(401).json({ error: 'Wrong password' });
+});
+
+app.get('/admin/logout', (req, res) => { req.session.destroy(); res.json({ success: true }); });
+
+app.get('/api/admin/products', isAdmin, async (req, res) => {
+    try {
+        const rows = await dbAll(`SELECT * FROM products`);
+        res.json(rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/admin/products', isAdmin, async (req, res) => {
+    const { name, description, price, stock, image_url, category, unit, weight_options } = req.body;
+    try {
+        const result = await dbRun(
+            `INSERT INTO products (name, description, price, stock, image_url, category, unit, weight_options) VALUES (?,?,?,?,?,?,?,?)`,
+            [name, description || '', price, stock, image_url || '', category || 'Vegetables', unit || 'kg', weight_options || '250g,500g,1kg']
+        );
+        res.json({ id: result.lastID });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.put('/api/admin/products/:id', isAdmin, async (req, res) => {
+    const { name, description, price, stock, image_url, category, unit, weight_options } = req.body;
+    try {
+        await dbRun(
+            `UPDATE products SET name=?, description=?, price=?, stock=?, image_url=?, category=?, unit=?, weight_options=? WHERE id=?`,
+            [name, description || '', price, stock, image_url || '', category || 'Vegetables', unit || 'kg', weight_options || '250g,500g,1kg', req.params.id]
+        );
+        res.json({ updated: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.delete('/api/admin/products/:id', isAdmin, async (req, res) => {
+    try {
+        await dbRun(`DELETE FROM products WHERE id=?`, [req.params.id]);
+        res.json({ deleted: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/admin/orders', isAdmin, async (req, res) => {
+    try {
+        const orders = await dbAll(`SELECT * FROM orders ORDER BY id DESC`);
+        for (let order of orders) {
+            const items = await dbAll(`SELECT product_id, quantity, price, weight FROM order_items WHERE order_id = ?`, [order.id]);
+            order.items = items;
+        }
+        res.json(orders);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.put('/api/admin/orders/:id/pay', isAdmin, async (req, res) => {
+    const orderId = req.params.id;
+    try {
+        const order = await dbGet(`SELECT payment_status, customer_phone, total_amount FROM orders WHERE id = ?`, [orderId]);
+        if (!order) return res.status(404).json({ error: 'Order not found' });
+        if (order.payment_status === 'paid') return res.json({ message: 'Already paid' });
+        
+        const items = await dbAll(`SELECT product_id, quantity FROM order_items WHERE order_id = ?`, [orderId]);
+        for (let it of items) {
+            const prod = await dbGet(`SELECT stock FROM products WHERE id = ?`, [it.product_id]);
+            if (prod.stock < it.quantity) return res.status(400).json({ error: 'Stock insufficient' });
+            await dbRun(`UPDATE products SET stock = stock - ? WHERE id = ?`, [it.quantity, it.product_id]);
+        }
+        await dbRun(`UPDATE orders SET payment_status = 'paid', order_status = 'confirmed' WHERE id = ?`, [orderId]);
+        
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.put('/api/admin/orders/:id/dispatch', isAdmin, async (req, res) => {
+    try {
+        await dbRun(`UPDATE orders SET order_status = 'dispatched' WHERE id = ?`, [req.params.id]);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.put('/api/admin/orders/:id/deliver', isAdmin, async (req, res) => {
+    try {
+        await dbRun(`UPDATE orders SET order_status = 'delivered' WHERE id = ?`, [req.params.id]);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ==================== BULK PRODUCT UPLOAD ====================
+app.get('/api/admin/products/template', isAdmin, (req, res) => {
+    const templateHeaders = ['name', 'price', 'stock', 'unit', 'weight_options', 'category', 'image_url', 'description'];
+    let csvContent = templateHeaders.join(',') + '\n';
+    csvContent += 'Tomato,40,100,kg,"250g,500g,1kg",Vegetables,,Fresh red tomatoes\n';
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="product_template.csv"');
+    res.send(csvContent);
+});
+
+const csvUpload = multer({ dest: 'uploads/' });
+app.post('/api/admin/products/bulk', isAdmin, csvUpload.single('csvFile'), async (req, res) => {
+    try {
+        if (!req.file) return res.status(400).json({ error: 'No CSV file uploaded' });
+        
+        const results = [];
+        await new Promise((resolve, reject) => {
+            fs.createReadStream(req.file.path)
+                .pipe(csv())
+                .on('data', (data) => results.push(data))
+                .on('end', resolve)
+                .on('error', reject);
+        });
+        
+        const insertedProducts = [];
+        for (const row of results) {
+            if (!row.name || !row.price || !row.stock) continue;
+            
+            const result = await dbRun(
+                `INSERT INTO products (name, description, price, stock, image_url, category, unit, weight_options) VALUES (?,?,?,?,?,?,?,?)`,
+                [row.name.trim(), row.description || '', parseFloat(row.price), parseInt(row.stock), row.image_url || '', row.category || 'Vegetables', row.unit || 'kg', row.weight_options || '250g,500g,1kg']
+            );
+            insertedProducts.push({ id: result.lastID, name: row.name });
+        }
+        
+        fs.unlinkSync(req.file.path);
+        res.json({ success: true, message: `${insertedProducts.length} products added`, inserted: insertedProducts });
+    } catch (error) {
+        if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        res.status(500).json({ error: 'Bulk upload failed: ' + error.message });
+    }
+});
+
+// ==================== IMAGE UPLOAD ====================
+app.post('/api/upload-image', upload.single('image'), async (req, res) => {
+    try {
+        if (!req.file) return res.status(400).json({ success: false, error: 'No image file' });
+        const extension = req.file.originalname.split('.').pop();
+        const filename = `${Date.now()}_upload.${extension}`;
+        const localPath = `/product_images/${filename}`;
+        const filePath = path.join(__dirname, 'public', localPath);
+        fs.writeFileSync(filePath, req.file.buffer);
+        res.json({ success: true, url: localPath });
+    } catch (error) {
+        res.status(500).json({ success: false, error: 'Upload failed' });
+    }
+});
+
+// ==================== SET ONLINE IMAGES ====================
+app.get('/api/set-online-images', isAdmin, async (req, res) => {
+    const images = {
+        1: 'https://cdn.pixabay.com/photo/2020/06/01/13/55/tomatoes-5247827_640.jpg',
+        2: 'https://cdn.pixabay.com/photo/2016/08/11/08/04/potatoes-1585075_640.jpg',
+        3: 'https://cdn.pixabay.com/photo/2020/07/15/20/38/onion-5409359_640.jpg',
+        4: 'https://cdn.pixabay.com/photo/2017/06/23/06/04/carrots-2433439_640.jpg',
+        5: 'https://cdn.pixabay.com/photo/2016/03/26/16/44/spinach-1280831_640.jpg',
+        6: 'https://cdn.pixabay.com/photo/2016/07/24/17/33/cucumber-1538652_640.jpg'
+    };
+    
+    for (const [id, url] of Object.entries(images)) {
+        await dbRun(`UPDATE products SET image_url = ? WHERE id = ?`, [url, id]);
+        console.log(`✅ Updated product ${id} with online image`);
+    }
+    
+    res.json({ success: true, message: 'Online images set for all products!' });
+});
+
+// ==================== HEALTH & PAGE ROUTES ====================
+app.get('/healthz', (req, res) => {
+    res.status(200).send('OK');
+});
+
+app.get('/admin-page', (req, res) => {
+    if (req.session && req.session.admin) {
+        res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+    } else {
+        res.send(`<html><body style="font-family:sans-serif;text-align:center;margin-top:100px"><h2>Admin Login</h2><form id="loginForm"><input type="password" id="pwd" placeholder="Enter password" /><button type="submit">Login</button></form><script>document.getElementById('loginForm').onsubmit=async(e)=>{e.preventDefault();const pwd=document.getElementById('pwd').value;const r=await fetch('/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pwd})});if(r.ok) location.reload();else alert('Wrong password');};<\/script></body></html>`);
+    }
+});
+
+app.listen(PORT, HOST, () => {
+    console.log(`✅ Veggie Shop running on http://${HOST}:${PORT}`);
+    console.log(`👉 Admin panel: http://${HOST}:${PORT}/admin-page`);
+});
