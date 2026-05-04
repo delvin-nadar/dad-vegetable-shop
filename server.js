@@ -38,64 +38,7 @@ if (!fs.existsSync(uploadsDir)) {
 // ==================== DATABASE SETUP ====================
 const db = new sqlite3.Database('./vegetable_shop.db');
 
-db.serialize(() => {
-    db.run(`CREATE TABLE IF NOT EXISTS products (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        description TEXT,
-        price REAL NOT NULL,
-        stock INTEGER NOT NULL DEFAULT 0,
-        image_url TEXT,
-        category TEXT,
-        unit TEXT DEFAULT 'kg',
-        weight_options TEXT DEFAULT '1kg'
-    )`);
-
-    db.run(`CREATE TABLE IF NOT EXISTS orders (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        customer_name TEXT NOT NULL,
-        customer_phone TEXT NOT NULL,
-        customer_address TEXT NOT NULL,
-        total_amount REAL NOT NULL,
-        payment_status TEXT DEFAULT 'pending',
-        order_status TEXT DEFAULT 'pending',
-        delivery_slot TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )`);
-
-    db.run(`CREATE TABLE IF NOT EXISTS order_items (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        order_id INTEGER,
-        product_id INTEGER,
-        quantity INTEGER,
-        price REAL,
-        weight TEXT,
-        FOREIGN KEY(order_id) REFERENCES orders(id),
-        FOREIGN KEY(product_id) REFERENCES products(id)
-    )`);
-
-    // Insert sample products if none exist
-    db.get(`SELECT COUNT(*) as count FROM products`, (err, row) => {
-        if (row.count === 0) {
-            const veggies = [
-                ['Tomato', 'Fresh red tomatoes', 40, 100, 'https://cdn.pixabay.com/photo/2020/06/01/13/55/tomatoes-5247827_640.jpg', 'Vegetables', 'kg', '250g,500g,1kg'],
-                ['Potato', 'Farm potatoes', 30, 100, 'https://cdn.pixabay.com/photo/2016/08/11/08/04/potatoes-1585075_640.jpg', 'Vegetables', 'kg', '250g,500g,1kg'],
-                ['Onion', 'Red onion', 35, 100, 'https://cdn.pixabay.com/photo/2020/07/15/20/38/onion-5409359_640.jpg', 'Vegetables', 'kg', '250g,500g,1kg'],
-                ['Carrot', 'Organic carrots', 45, 100, 'https://cdn.pixabay.com/photo/2017/06/23/06/04/carrots-2433439_640.jpg', 'Vegetables', 'kg', '250g,500g,1kg'],
-                ['Spinach', 'Fresh spinach bunch', 25, 100, 'https://cdn.pixabay.com/photo/2016/03/26/16/44/spinach-1280831_640.jpg', 'Vegetables', 'bunch', '1,2,3,4,5,6,7,8,9,10,11,12,13,14,15'],
-                ['Cucumber', 'Crisp cucumber', 35, 100, 'https://cdn.pixabay.com/photo/2016/07/24/17/33/cucumber-1538652_640.jpg', 'Vegetables', 'piece', '1,2,3,4,5,6,7,8,9,10,11,12,13,14,15']
-            ];
-            const stmt = db.prepare(`INSERT INTO products (name, description, price, stock, image_url, category, unit, weight_options) VALUES (?,?,?,?,?,?,?,?)`);
-            for (const v of veggies) {
-                stmt.run(v);
-            }
-            stmt.finalize();
-            console.log('✅ Sample products inserted.');
-        }
-    });
-});
-
-// Helper: Promisify db.get
+// Helper: Promisify db functions
 function dbGet(sql, params = []) {
     return new Promise((resolve, reject) => {
         db.get(sql, params, (err, row) => {
@@ -109,7 +52,7 @@ function dbAll(sql, params = []) {
     return new Promise((resolve, reject) => {
         db.all(sql, params, (err, rows) => {
             if (err) reject(err);
-            else resolve(rows);
+            else resolve(rows || []);
         });
     });
 }
@@ -123,6 +66,78 @@ function dbRun(sql, params = []) {
     });
 }
 
+// Initialize database
+db.serialize(() => {
+    // Create products table
+    db.run(`CREATE TABLE IF NOT EXISTS products (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        description TEXT,
+        price REAL NOT NULL,
+        stock INTEGER NOT NULL DEFAULT 0,
+        image_url TEXT,
+        category TEXT,
+        unit TEXT DEFAULT 'kg',
+        weight_options TEXT DEFAULT '1kg'
+    )`);
+
+    // Create orders table
+    db.run(`CREATE TABLE IF NOT EXISTS orders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_name TEXT NOT NULL,
+        customer_phone TEXT NOT NULL,
+        customer_address TEXT NOT NULL,
+        total_amount REAL NOT NULL,
+        payment_status TEXT DEFAULT 'pending',
+        order_status TEXT DEFAULT 'pending',
+        delivery_slot TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    // Create order_items table
+    db.run(`CREATE TABLE IF NOT EXISTS order_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id INTEGER,
+        product_id INTEGER,
+        quantity INTEGER,
+        price REAL,
+        weight TEXT,
+        FOREIGN KEY(order_id) REFERENCES orders(id),
+        FOREIGN KEY(product_id) REFERENCES products(id)
+    )`);
+
+    // Insert sample products if none exist
+    db.get(`SELECT COUNT(*) as count FROM products`, (err, row) => {
+        if (err) {
+            console.error('Error checking products:', err.message);
+            return;
+        }
+        
+        if (row.count === 0) {
+            console.log('📦 Inserting sample products...');
+            const veggies = [
+                ['Tomato', 'Fresh red tomatoes', 40, 100, 'https://cdn.pixabay.com/photo/2020/06/01/13/55/tomatoes-5247827_640.jpg', 'Vegetables', 'kg', '250g,500g,1kg'],
+                ['Potato', 'Farm potatoes', 30, 100, 'https://cdn.pixabay.com/photo/2016/08/11/08/04/potatoes-1585075_640.jpg', 'Vegetables', 'kg', '250g,500g,1kg'],
+                ['Onion', 'Red onion', 35, 100, 'https://cdn.pixabay.com/photo/2020/07/15/20/38/onion-5409359_640.jpg', 'Vegetables', 'kg', '250g,500g,1kg'],
+                ['Carrot', 'Organic carrots', 45, 100, 'https://cdn.pixabay.com/photo/2017/06/23/06/04/carrots-2433439_640.jpg', 'Vegetables', 'kg', '250g,500g,1kg'],
+                ['Spinach', 'Fresh spinach bunch', 25, 100, 'https://cdn.pixabay.com/photo/2016/03/26/16/44/spinach-1280831_640.jpg', 'Vegetables', 'bunch', '1,2,3,4,5,6,7,8,9,10,11,12,13,14,15'],
+                ['Cucumber', 'Crisp cucumber', 35, 100, 'https://cdn.pixabay.com/photo/2016/07/24/17/33/cucumber-1538652_640.jpg', 'Vegetables', 'piece', '1,2,3,4,5,6,7,8,9,10,11,12,13,14,15']
+            ];
+            
+            const stmt = db.prepare(`INSERT INTO products (name, description, price, stock, image_url, category, unit, weight_options) VALUES (?,?,?,?,?,?,?,?)`);
+            for (const v of veggies) {
+                stmt.run(v, (err) => {
+                    if (err) console.error('Error inserting:', err.message);
+                });
+            }
+            stmt.finalize();
+            console.log('✅ Sample products inserted.');
+        } else {
+            console.log(`📊 Existing database found: ${row.count} products.`);
+        }
+    });
+});
+
 function isAdmin(req, res, next) {
     if (req.session && req.session.admin) return next();
     else return res.status(401).json({ error: 'Unauthorized' });
@@ -134,6 +149,7 @@ app.get('/api/products', async (req, res) => {
         const rows = await dbAll(`SELECT id, name, price, stock, image_url, category, unit, weight_options FROM products`);
         res.json({ products: rows });
     } catch (err) {
+        console.error('Error fetching products:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -158,12 +174,11 @@ app.post('/api/orders', async (req, res) => {
         );
         const orderId = orderResult.lastID;
         
+        const insertItem = db.prepare(`INSERT INTO order_items (order_id, product_id, quantity, price, weight) VALUES (?,?,?,?,?)`);
         for (let it of items) {
-            await dbRun(
-                `INSERT INTO order_items (order_id, product_id, quantity, price, weight) VALUES (?,?,?,?,?)`,
-                [orderId, it.productId, it.quantity, it.price, it.weight || null]
-            );
+            insertItem.run(orderId, it.productId, it.quantity, it.price, it.weight || null);
         }
+        insertItem.finalize();
         
         const UPI_ID = "9029186608@okbizaxis";
         const upiUrl = `upi://pay?pa=${UPI_ID}&pn=Dad%20Veg%20Shop&am=${total}&cu=INR&tn=Order%20${orderId}`;
@@ -172,6 +187,7 @@ app.post('/api/orders', async (req, res) => {
             res.json({ orderId, totalAmount: total, qrCodeDataURL: qrDataUrl, upiIntentUrl: upiUrl });
         });
     } catch (err) {
+        console.error('Order error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
