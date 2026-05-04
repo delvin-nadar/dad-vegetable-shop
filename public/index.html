@@ -135,4 +135,365 @@
             <option value="Morning (8-10 AM)">Morning (8-10 AM)</option>
             <option value="Evening (8-10 PM)">Evening (8-10 PM)</option>
         </select>
-   
+    </div>
+    
+    <div id="qrPaymentSection" style="display: none;">
+        <div class="qr-area">
+            <img id="qrCodeImg" style="width: 180px; height: 180px; border-radius: 20px;">
+            <p style="margin-top:10px;">or</p>
+            <button id="payWithAppBtn" style="background:#2e7d32; color:white; padding:10px; border-radius:40px; width:100%;">📱 Pay with UPI App</button>
+        </div>
+        <p style="text-align:center;">Scan QR or click above to pay.<br>Order ID: <strong id="orderIdSpan"></strong><br>Amount: ₹<span id="orderAmountSpan"></span></p>
+        <div class="payment-note">
+            💡 <strong>Once payment is done, close this window.</strong><br>
+            Your order will be placed automatically!
+        </div>
+        <button id="closeModalBtn" style="background:#4caf50; padding:0.8rem; width:100%; border:none; border-radius:40px; color:white; font-weight:bold; cursor:pointer;">✓ I have completed payment - Close</button>
+    </div>
+    
+    <div id="checkoutFormSection">
+        <button id="placeOrderBtn" class="checkout-btn">Place Order & Get QR</button>
+    </div>
+</div>
+
+<div class="shop-location" style="text-align:center; margin:20px 0;">
+    📍 Our Shop: <a href="https://share.google/eUozOVKELli8hQiJ8" target="_blank">View on Map</a>
+</div>
+
+<footer>
+    🧾 Fresh vegetables delivered | UPI QR payment | Dad's Shop since 1995
+</footer>
+
+<a href="https://wa.me/919029186608?text=Hi%2C%20I%20want%20to%20place%20an%20order" class="whatsapp-float" target="_blank">💬 WhatsApp us</a>
+
+<script>
+    let allProducts = [];
+    let cart = [];
+    let currentFilter = 'all';
+    let currentUpiIntentUrl = '';
+    let backPressCount = 0;
+    let backPressTimer = null;
+
+    const productsContainer = document.getElementById('productsContainer');
+    const cartSidebar = document.getElementById('cartSidebar');
+    const overlay = document.getElementById('overlay');
+    const orderModal = document.getElementById('orderModal');
+
+    window.addEventListener('popstate', function() {
+        if (cartSidebar.classList.contains('open')) {
+            cartSidebar.classList.remove('open');
+            overlay.classList.remove('active');
+            history.pushState(null, null, window.location.href);
+        } else if (orderModal.classList.contains('open')) {
+            orderModal.classList.remove('open');
+            overlay.classList.remove('active');
+            history.pushState(null, null, window.location.href);
+        } else {
+            if (backPressCount === 0) {
+                backPressCount++;
+                if (confirm('Do you want to exit the app?')) {
+                    window.close();
+                    history.back();
+                } else {
+                    backPressCount = 0;
+                    history.pushState(null, null, window.location.href);
+                }
+                backPressTimer = setTimeout(() => { backPressCount = 0; }, 2000);
+            } else {
+                window.close();
+                history.back();
+            }
+        }
+    });
+    history.pushState(null, null, window.location.href);
+
+    function validatePhone(phone) { return /^\d{10}$/.test(phone); }
+    function calculateDelivery(totalAmount) { return totalAmount >= 100 ? 0 : 30; }
+
+    async function loadProducts() {
+        try {
+            const res = await fetch('/api/products?_=' + Date.now(), {
+                cache: 'no-store',
+                headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+            });
+            const data = await res.json();
+            allProducts = data.products;
+            renderProducts(allProducts);
+        } catch (err) {
+            productsContainer.innerHTML = '<p>Error loading veggies. Please refresh.</p>';
+        }
+    }
+
+    function getCartQuantity(productId) {
+        const item = cart.find(item => item.productId === productId);
+        return item ? item.quantity : 0;
+    }
+
+    function renderProducts(productsToRender) {
+        if (!productsToRender.length) {
+            productsContainer.innerHTML = '<p>No vegetables available currently. Check back later!</p>';
+            return;
+        }
+        
+        const cacheBuster = Date.now();
+        
+        productsContainer.innerHTML = productsToRender.map(p => {
+            const inCartQty = getCartQuantity(p.id);
+            const inCart = inCartQty > 0;
+            const unitDisplay = p.unit || 'kg';
+            
+            let weightHtml = '';
+            if (unitDisplay === 'kg') {
+                weightHtml = `<select class="weight-select" data-id="${p.id}" data-price="${p.price}" data-unit="kg">
+                    <option value="" disabled selected>-- Select Weight --</option>
+                    <option value="250g">250g - ₹${(p.price * 0.25).toFixed(2)}</option>
+                    <option value="500g">500g - ₹${(p.price * 0.5).toFixed(2)}</option>
+                    <option value="1kg">1kg - ₹${p.price}</option>
+                </select>`;
+            } else {
+                let options = '<option value="" disabled selected>-- Select Quantity --</option>';
+                for (let i = 1; i <= 15; i++) {
+                    options += `<option value="${i}">${i} ${unitDisplay}${i > 1 ? 's' : ''} - ₹${(p.price * i).toFixed(2)}</option>`;
+                }
+                weightHtml = `<select class="weight-select" data-id="${p.id}" data-price="${p.price}" data-unit="${unitDisplay}">
+                    ${options}
+                </select>`;
+            }
+            
+            const imageUrl = p.image_url ? `${p.image_url}?t=${cacheBuster}` : 'https://cdn.pixabay.com/photo/2020/06/01/13/55/tomatoes-5247827_640.jpg';
+            
+            return `
+                <div class="product-card">
+                    ${inCart ? '<div class="added-to-cart-badge">✓ Added to Cart</div>' : ''}
+                    <img class="product-img" src="${imageUrl}" alt="${p.name}">
+                    <div class="product-name">${p.name}</div>
+                    <div class="product-price">₹${p.price}/${unitDisplay}</div>
+                    <div class="product-category">${p.category || 'Vegetables'}</div>
+                    <div class="stock-badge">${p.stock > 0 ? `In stock: ${p.stock} ${unitDisplay}` : 'Out of stock'}</div>
+                    ${weightHtml}
+                    <button class="add-btn ${inCart ? 'in-cart' : ''}" data-id="${p.id}" data-name="${p.name}" data-price="${p.price}" data-unit="${unitDisplay}" data-stock="${p.stock}">
+                        ${inCart ? `✓ Added (${inCartQty})` : 'Add to Cart'}
+                    </button>
+                </div>
+            `;
+        }).join('');
+
+        document.querySelectorAll('.add-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const id = parseInt(btn.dataset.id);
+                const name = btn.dataset.name;
+                const basePrice = parseFloat(btn.dataset.price);
+                const unit = btn.dataset.unit;
+                const stock = parseInt(btn.dataset.stock);
+                const weightSelect = document.querySelector(`.weight-select[data-id="${id}"]`);
+                const selectedWeight = weightSelect ? weightSelect.value : null;
+                
+                if (!selectedWeight || selectedWeight === '') {
+                    alert('Please select weight/quantity first');
+                    return;
+                }
+                
+                let price = basePrice;
+                if (unit === 'kg') {
+                    if (selectedWeight === '250g') price = basePrice * 0.25;
+                    else if (selectedWeight === '500g') price = basePrice * 0.5;
+                    else price = basePrice;
+                } else {
+                    const qty = parseInt(selectedWeight);
+                    price = basePrice * qty;
+                }
+                
+                const existing = cart.find(item => item.productId === id && item.weight === selectedWeight);
+                const currentQty = existing ? existing.quantity : 0;
+                if (currentQty + 1 > stock) {
+                    alert(`Only ${stock} ${unit} available!`);
+                    return;
+                }
+                
+                if (existing) {
+                    existing.quantity += 1;
+                } else {
+                    cart.push({ productId: id, name, price, quantity: 1, weight: selectedWeight, unit });
+                }
+                updateCartUI();
+                renderProducts(allProducts);
+            });
+        });
+    }
+
+    function updateCartUI() {
+        const subtotal = cart.reduce((sum, i) => sum + (i.price * i.quantity), 0);
+        const delivery = calculateDelivery(subtotal);
+        const total = subtotal + delivery;
+        document.getElementById('cartCount').innerText = cart.reduce((sum, i) => sum + i.quantity, 0);
+        document.getElementById('cartSubtotal').innerText = subtotal.toFixed(2);
+        document.getElementById('deliveryCharge').innerText = delivery;
+        document.getElementById('cartTotalAmount').innerText = total.toFixed(2);
+        if (cart.length === 0) {
+            document.getElementById('cartItemsList').innerHTML = 'Cart is empty 🛒';
+            return;
+        }
+        document.getElementById('cartItemsList').innerHTML = cart.map((item, idx) => `
+            <div class="cart-item">
+                <span>${item.name} (${item.weight}) x${item.quantity}</span>
+                <span>₹${(item.price * item.quantity).toFixed(2)} 
+                    <button style="background:#e53935; border:none; color:white; border-radius:30px; padding:2px 10px; margin-left:8px; cursor:pointer;" data-idx="${idx}">Remove</button>
+                </span>
+            </div>
+        `).join('');
+        document.querySelectorAll('.cart-item button').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const idx = parseInt(btn.dataset.idx);
+                cart.splice(idx, 1);
+                updateCartUI();
+                renderProducts(allProducts);
+            });
+        });
+    }
+
+    function filterProducts(category) {
+        currentFilter = category;
+        if (category === 'all') {
+            renderProducts(allProducts);
+        } else {
+            const filtered = allProducts.filter(p => p.category === category);
+            renderProducts(filtered);
+        }
+    }
+    window.filterProducts = filterProducts;
+
+    document.getElementById('cartIcon').onclick = () => {
+        cartSidebar.classList.add('open');
+        overlay.classList.add('active');
+    };
+    document.getElementById('closeCartBtn').onclick = () => {
+        cartSidebar.classList.remove('open');
+        overlay.classList.remove('active');
+    };
+    overlay.onclick = () => {
+        cartSidebar.classList.remove('open');
+        overlay.classList.remove('active');
+        orderModal.classList.remove('open');
+    };
+
+    document.getElementById('checkoutBtn').onclick = () => {
+        if (cart.length === 0) {
+            alert('Your cart is empty! Add some veggies.');
+            return;
+        }
+        orderModal.classList.add('open');
+        overlay.classList.add('active');
+        document.getElementById('qrPaymentSection').style.display = 'none';
+        document.getElementById('checkoutFormSection').style.display = 'block';
+    };
+
+    document.getElementById('placeOrderBtn').onclick = async () => {
+        const name = document.getElementById('customerName').value.trim();
+        const phone = document.getElementById('customerPhone').value.trim();
+        const address = document.getElementById('customerAddress').value.trim();
+        const deliverySlot = document.getElementById('deliverySlot').value;
+        
+        if (!name) return alert('Please enter your name');
+        if (!validatePhone(phone)) return alert('Please enter a valid 10-digit mobile number');
+        if (!address) return alert('Please enter delivery address');
+        if (!deliverySlot) return alert('Please select a delivery slot');
+        
+        const subtotal = cart.reduce((s, i) => s + i.price * i.quantity, 0);
+        const deliveryCharge = calculateDelivery(subtotal);
+        const totalAmount = subtotal + deliveryCharge;
+        
+        const placeBtn = document.getElementById('placeOrderBtn');
+        placeBtn.textContent = 'Processing...';
+        placeBtn.disabled = true;
+        
+        const payload = {
+            customerName: name,
+            customerPhone: phone,
+            customerAddress: address,
+            deliverySlot: deliverySlot,
+            items: cart.map(i => ({ productId: i.productId, quantity: i.quantity, price: i.price, weight: i.weight })),
+            totalAmount: totalAmount
+        };
+        
+        try {
+            const res = await fetch('/api/orders', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (!res.ok) return alert(data.error);
+            
+            alert(`✅ Order Confirmed!\n\nOrder ID: ${data.orderId}\nTotal: ₹${data.totalAmount}\n\nYou can pay now using the QR code.`);
+            
+            currentUpiIntentUrl = data.upiIntentUrl;
+            document.getElementById('orderIdSpan').innerText = data.orderId;
+            document.getElementById('orderAmountSpan').innerText = data.totalAmount;
+            document.getElementById('qrCodeImg').src = data.qrCodeDataURL;
+            document.getElementById('qrPaymentSection').style.display = 'block';
+            document.getElementById('checkoutFormSection').style.display = 'none';
+            
+            cart = [];
+            updateCartUI();
+            renderProducts(allProducts);
+        } catch (err) {
+            alert('Network error. Could not place order');
+        } finally {
+            placeBtn.textContent = 'Place Order & Get QR';
+            placeBtn.disabled = false;
+        }
+    };
+
+    document.getElementById('closeModalBtn').onclick = () => {
+        orderModal.classList.remove('open');
+        overlay.classList.remove('active');
+        alert('✅ Your order has been placed successfully!\n\nYou will receive updates on WhatsApp.\n\nThank you for shopping with us! 🥬');
+    };
+
+    document.getElementById('payWithAppBtn')?.addEventListener('click', () => {
+        if (currentUpiIntentUrl) {
+            window.location.href = currentUpiIntentUrl;
+        }
+    });
+
+    window.trackOrders = async function() {
+        const phone = document.getElementById('trackPhone').value.trim();
+        if (!validatePhone(phone)) return alert('Please enter a valid 10-digit mobile number');
+        
+        try {
+            const res = await fetch(`/api/orders/${phone}`);
+            const data = await res.json();
+            if (data.error) return alert(data.error);
+            
+            const statusMap = {
+                'pending': { text: '⏳ Pending Payment', class: 'status-pending' },
+                'confirmed': { text: '✅ Payment Confirmed - Preparing Order', class: 'status-confirmed' },
+                'dispatched': { text: '🚚 Order Dispatched - On the Way!', class: 'status-dispatched' },
+                'delivered': { text: '🎉 Delivered! Enjoy Your Vegetables', class: 'status-delivered' }
+            };
+            
+            let html = `<h4>📋 Your Orders (${data.length})</h4>`;
+            data.forEach(order => {
+                const status = statusMap[order.order_status] || { text: order.order_status, class: 'status-pending' };
+                html += `
+                    <div class="track-result-card">
+                        <strong>Order #${order.id}</strong><br>
+                        <span class="status-badge ${status.class}">${status.text}</span><br>
+                        Payment: ${order.payment_status === 'paid' ? '✅ Paid' : '⏳ Awaiting Payment'}<br>
+                        Total: ₹${order.total_amount}<br>
+                        Delivery Slot: ${order.delivery_slot || 'Not selected'}<br>
+                        Date: ${new Date(order.created_at).toLocaleDateString()}
+                    </div>
+                `;
+            });
+            document.getElementById('trackResult').innerHTML = html;
+        } catch (err) {
+            alert('Error tracking orders');
+        }
+    };
+
+    loadProducts();
+    updateCartUI();
+</script>
+</body>
+</html>
