@@ -18,6 +18,7 @@ const HOST = '0.0.0.0';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 if (!ADMIN_PASSWORD) {
     console.error('❌ FATAL ERROR: ADMIN_PASSWORD environment variable is not set!');
+    console.error('👉 Please set ADMIN_PASSWORD in Render dashboard -> Environment Variables');
     process.exit(1);
 }
 
@@ -36,10 +37,7 @@ const db = new sqlite3.Database('./vegetable_shop.db');
 
 function dbAll(sql, params = []) {
     return new Promise((resolve, reject) => {
-        db.all(sql, params, (err, rows) => {
-            if (err) reject(err);
-            else resolve(rows || []);
-        });
+        db.all(sql, params, (err, rows) => resolve(rows || []));
     });
 }
 
@@ -98,11 +96,6 @@ db.serialize(() => {
 
     // Insert sample products if none exist
     db.get(`SELECT COUNT(*) as count FROM products`, (err, row) => {
-        if (err) {
-            console.error('Error checking products:', err.message);
-            return;
-        }
-        
         if (row.count === 0) {
             console.log('📦 Inserting sample products...');
             const veggies = [
@@ -113,11 +106,8 @@ db.serialize(() => {
                 ['Spinach', 'Fresh spinach bunch', 25, 100, 'https://cdn.pixabay.com/photo/2016/03/26/16/44/spinach-1280831_640.jpg', 'Vegetables', 'bunch', '1,2,3,4,5,6,7,8,9,10,11,12,13,14,15'],
                 ['Cucumber', 'Crisp cucumber', 35, 100, 'https://cdn.pixabay.com/photo/2016/07/24/17/33/cucumber-1538652_640.jpg', 'Vegetables', 'piece', '1,2,3,4,5,6,7,8,9,10,11,12,13,14,15']
             ];
-            
             const stmt = db.prepare(`INSERT INTO products (name, description, price, stock, image_url, category, unit, weight_options) VALUES (?,?,?,?,?,?,?,?)`);
-            for (const v of veggies) {
-                stmt.run(v);
-            }
+            for (const v of veggies) stmt.run(v);
             stmt.finalize();
             console.log('✅ Sample products inserted.');
         }
@@ -125,7 +115,7 @@ db.serialize(() => {
 });
 
 function isAdmin(req, res, next) {
-    if (req.session && req.session.admin) return next();
+    if (req.session?.admin) return next();
     else return res.status(401).json({ error: 'Unauthorized' });
 }
 
@@ -142,7 +132,7 @@ app.get('/api/products', async (req, res) => {
 
 app.post('/api/orders', async (req, res) => {
     const { customerName, customerPhone, customerAddress, items, deliverySlot, totalAmount } = req.body;
-    if (!items || items.length === 0) return res.status(400).json({ error: 'No items' });
+    if (!items?.length) return res.status(400).json({ error: 'No items' });
     
     try {
         const total = totalAmount || items.reduce((s, i) => s + i.price * i.quantity, 0);
@@ -173,11 +163,8 @@ app.post('/api/orders', async (req, res) => {
 
 app.get('/api/orders/:phone', async (req, res) => {
     try {
-        const orders = await dbAll(
-            `SELECT id, order_status, payment_status, total_amount, delivery_slot, created_at FROM orders WHERE customer_phone = ? ORDER BY id DESC`,
-            [req.params.phone]
-        );
-        if (!orders || orders.length === 0) return res.status(404).json({ error: 'No orders found' });
+        const orders = await dbAll(`SELECT id, order_status, payment_status, total_amount, delivery_slot, created_at FROM orders WHERE customer_phone = ? ORDER BY id DESC`, [req.params.phone]);
+        if (!orders?.length) return res.status(404).json({ error: 'No orders found' });
         res.json(orders);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -197,103 +184,60 @@ app.post('/admin/login', (req, res) => {
 app.get('/admin/logout', (req, res) => { req.session.destroy(); res.json({ success: true }); });
 
 app.get('/api/admin/products', isAdmin, async (req, res) => {
-    try {
-        const rows = await dbAll(`SELECT * FROM products`);
-        res.json(rows);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+    const rows = await dbAll(`SELECT * FROM products`);
+    res.json(rows);
 });
 
 app.post('/api/admin/products', isAdmin, async (req, res) => {
     const { name, description, price, stock, image_url, category, unit, weight_options } = req.body;
-    try {
-        const result = await dbRun(
-            `INSERT INTO products (name, description, price, stock, image_url, category, unit, weight_options) VALUES (?,?,?,?,?,?,?,?)`,
-            [name, description || '', price, stock, image_url || '', category || 'Vegetables', unit || 'kg', weight_options || '250g,500g,1kg']
-        );
-        res.json({ id: result.lastID });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+    const result = await dbRun(
+        `INSERT INTO products (name, description, price, stock, image_url, category, unit, weight_options) VALUES (?,?,?,?,?,?,?,?)`,
+        [name, description || '', price, stock, image_url || '', category || 'Vegetables', unit || 'kg', weight_options || '250g,500g,1kg']
+    );
+    res.json({ id: result.lastID });
 });
 
 app.put('/api/admin/products/:id', isAdmin, async (req, res) => {
     const { name, description, price, stock, image_url, category, unit, weight_options } = req.body;
-    try {
-        await dbRun(
-            `UPDATE products SET name=?, description=?, price=?, stock=?, image_url=?, category=?, unit=?, weight_options=? WHERE id=?`,
-            [name, description || '', price, stock, image_url || '', category || 'Vegetables', unit || 'kg', weight_options || '250g,500g,1kg', req.params.id]
-        );
-        res.json({ updated: true });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+    await dbRun(
+        `UPDATE products SET name=?, description=?, price=?, stock=?, image_url=?, category=?, unit=?, weight_options=? WHERE id=?`,
+        [name, description || '', price, stock, image_url || '', category || 'Vegetables', unit || 'kg', weight_options || '250g,500g,1kg', req.params.id]
+    );
+    res.json({ updated: true });
 });
 
 app.delete('/api/admin/products/:id', isAdmin, async (req, res) => {
-    try {
-        await dbRun(`DELETE FROM products WHERE id=?`, [req.params.id]);
-        res.json({ deleted: true });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+    await dbRun(`DELETE FROM products WHERE id=?`, [req.params.id]);
+    res.json({ deleted: true });
 });
 
 app.get('/api/admin/orders', isAdmin, async (req, res) => {
-    try {
-        const orders = await dbAll(`SELECT * FROM orders ORDER BY id DESC`);
-        res.json(orders);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+    const orders = await dbAll(`SELECT * FROM orders ORDER BY id DESC`);
+    res.json(orders);
 });
 
 app.put('/api/admin/orders/:id/pay', isAdmin, async (req, res) => {
-    try {
-        await dbRun(`UPDATE orders SET payment_status = 'paid', order_status = 'confirmed' WHERE id = ?`, [req.params.id]);
-        res.json({ success: true });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+    await dbRun(`UPDATE orders SET payment_status = 'paid', order_status = 'confirmed' WHERE id = ?`, [req.params.id]);
+    res.json({ success: true });
 });
 
 app.put('/api/admin/orders/:id/dispatch', isAdmin, async (req, res) => {
-    try {
-        await dbRun(`UPDATE orders SET order_status = 'dispatched' WHERE id = ?`, [req.params.id]);
-        res.json({ success: true });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+    await dbRun(`UPDATE orders SET order_status = 'dispatched' WHERE id = ?`, [req.params.id]);
+    res.json({ success: true });
 });
 
 app.put('/api/admin/orders/:id/deliver', isAdmin, async (req, res) => {
-    try {
-        await dbRun(`UPDATE orders SET order_status = 'delivered' WHERE id = ?`, [req.params.id]);
-        res.json({ success: true });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+    await dbRun(`UPDATE orders SET order_status = 'delivered' WHERE id = ?`, [req.params.id]);
+    res.json({ success: true });
 });
 
 // ==================== FIX DATABASE ENDPOINT ====================
 app.get('/api/fix-database', isAdmin, (req, res) => {
-    const fixes = [];
-    
-    db.run(`ALTER TABLE products ADD COLUMN unit TEXT DEFAULT 'kg'`, (err) => {
-        fixes.push(err ? 'unit column already exists' : 'unit column added');
-    });
-    db.run(`ALTER TABLE products ADD COLUMN weight_options TEXT DEFAULT '1kg'`, (err) => {
-        fixes.push(err ? 'weight_options column already exists' : 'weight_options column added');
-    });
-    db.run(`ALTER TABLE orders ADD COLUMN delivery_slot TEXT`, (err) => {
-        fixes.push(err ? 'delivery_slot column already exists' : 'delivery_slot column added');
-    });
-    db.run(`ALTER TABLE order_items ADD COLUMN weight TEXT`, (err) => {
-        fixes.push(err ? 'weight column already exists' : 'weight column added');
-    });
-    
-    res.json({ success: true, message: 'Database fixes applied', details: fixes });
+    db.run(`ALTER TABLE products ADD COLUMN unit TEXT DEFAULT 'kg'`, () => {});
+    db.run(`ALTER TABLE products ADD COLUMN weight_options TEXT DEFAULT '1kg'`, () => {});
+    db.run(`ALTER TABLE orders ADD COLUMN delivery_slot TEXT`, () => {});
+    db.run(`ALTER TABLE order_items ADD COLUMN weight TEXT`, () => {});
+    res.json({ success: true, message: 'Database fixes applied' });
 });
 
 // ==================== SET ONLINE IMAGES ====================
@@ -306,19 +250,15 @@ app.get('/api/set-online-images', isAdmin, async (req, res) => {
         5: 'https://cdn.pixabay.com/photo/2016/03/26/16/44/spinach-1280831_640.jpg',
         6: 'https://cdn.pixabay.com/photo/2016/07/24/17/33/cucumber-1538652_640.jpg'
     };
-    
-    for (const [id, url] of Object.entries(images)) {
-        await dbRun(`UPDATE products SET image_url = ? WHERE id = ?`, [url, id]);
-    }
-    
+    for (const [id, url] of Object.entries(images)) await dbRun(`UPDATE products SET image_url = ? WHERE id = ?`, [url, id]);
     res.json({ success: true, message: 'Online images set for all products!' });
 });
 
 // ==================== HEALTH & PAGE ROUTES ====================
-app.get('/healthz', (req, res) => { res.status(200).send('OK'); });
+app.get('/healthz', (req, res) => res.status(200).send('OK'));
 
 app.get('/admin-page', (req, res) => {
-    if (req.session && req.session.admin) {
+    if (req.session?.admin) {
         res.sendFile(path.join(__dirname, 'public', 'admin.html'));
     } else {
         res.send(`<html><body style="font-family:sans-serif;text-align:center;margin-top:100px"><h2>Admin Login</h2><form id="loginForm"><input type="password" id="pwd" placeholder="Enter password" /><button type="submit">Login</button></form><script>document.getElementById('loginForm').onsubmit=async(e)=>{e.preventDefault();const pwd=document.getElementById('pwd').value;const r=await fetch('/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pwd})});if(r.ok) location.reload();else alert('Wrong password');};<\/script></body></html>`);
