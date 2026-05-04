@@ -30,7 +30,6 @@
 <h2>📝 Orders</h2>
 <div id="orders"></div>
 
-<!-- Add Product Section -->
 <div class="product-form">
     <h3>➕ Add New Product</h3>
     <input type="text" id="newName" placeholder="Product Name">
@@ -63,7 +62,6 @@
     <button onclick="addProduct()">➕ Add Product</button>
 </div>
 
-<!-- Bulk Upload Section -->
 <div class="bulk-upload-section">
     <h3>📤 Bulk Upload Products</h3>
     <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
@@ -81,7 +79,6 @@
     <div id="bulkUploadResult" style="margin-top: 15px; display: none;"></div>
 </div>
 
-<!-- Bulk Image Fetch Section -->
 <div class="bulk-image-section">
     <h3>🖼️ Bulk Auto-Fetch Images</h3>
     <p style="margin-bottom: 10px;">Automatically search and add images for all products that don't have them.</p>
@@ -213,7 +210,7 @@ async function bulkFetchImages() {
 
 async function loadProducts() {
     let data = await fetchAuth('/api/admin/products');
-    let html = `<tr>
+    let html = `<table>
         <thead>
             <tr><th>ID</th><th>Name</th><th>Price</th><th>Stock</th><th>Unit</th><th>Weight Options</th><th>Category</th><th>Image</th><th>Action</th></tr>
         </thead>
@@ -233,7 +230,7 @@ async function loadProducts() {
                 </select></td>
             <td><input id="weight${p.id}" value="${p.weight_options || '250g,500g,1kg'}"></td>
             <td><input id="cat${p.id}" value="${p.category || ''}"></td>
-            <td><img src="${p.image_url}" style="max-width:50px; max-height:50px; border-radius:8px;" onerror="this.style.display='none'"><br><input id="img${p.id}" value="${p.image_url || ''}" style="width:150px;"></td>
+            <td><img src="${p.image_url}" class="image-preview" onerror="this.style.display='none'"><br><input id="img${p.id}" value="${p.image_url || ''}" style="width:150px;"></td>
             <td>
                 <button onclick="updateProduct(${p.id})">Update</button>
                 <button onclick="deleteProduct(${p.id})">Delete</button>
