@@ -15,12 +15,9 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const HOST = '0.0.0.0';
 
-// ==================== SECURE ADMIN PASSWORD ====================
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
-
 if (!ADMIN_PASSWORD) {
     console.error('❌ FATAL ERROR: ADMIN_PASSWORD environment variable is not set!');
-    console.error('👉 Please set ADMIN_PASSWORD in Render dashboard -> Environment Variables');
     process.exit(1);
 }
 
@@ -29,7 +26,6 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use('/product_images', express.static(path.join(__dirname, 'public', 'product_images')));
 app.use(session({ secret: 'dadveggie123', resave: false, saveUninitialized: true, cookie: { secure: false } }));
 
-// Create uploads directory
 const uploadsDir = path.join(__dirname, 'public', 'product_images');
 if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
@@ -37,16 +33,6 @@ if (!fs.existsSync(uploadsDir)) {
 
 // ==================== DATABASE SETUP ====================
 const db = new sqlite3.Database('./vegetable_shop.db');
-
-// Helper: Promisify db functions
-function dbGet(sql, params = []) {
-    return new Promise((resolve, reject) => {
-        db.get(sql, params, (err, row) => {
-            if (err) reject(err);
-            else resolve(row);
-        });
-    });
-}
 
 function dbAll(sql, params = []) {
     return new Promise((resolve, reject) => {
@@ -66,9 +52,9 @@ function dbRun(sql, params = []) {
     });
 }
 
-// Initialize database
+// Create tables with ALL columns
 db.serialize(() => {
-    // Create products table
+    // Products table with all columns
     db.run(`CREATE TABLE IF NOT EXISTS products (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
@@ -81,7 +67,7 @@ db.serialize(() => {
         weight_options TEXT DEFAULT '1kg'
     )`);
 
-    // Create orders table
+    // Orders table
     db.run(`CREATE TABLE IF NOT EXISTS orders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         customer_name TEXT NOT NULL,
@@ -94,17 +80,21 @@ db.serialize(() => {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
 
-    // Create order_items table
+    // Order items table
     db.run(`CREATE TABLE IF NOT EXISTS order_items (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         order_id INTEGER,
         product_id INTEGER,
         quantity INTEGER,
         price REAL,
-        weight TEXT,
-        FOREIGN KEY(order_id) REFERENCES orders(id),
-        FOREIGN KEY(product_id) REFERENCES products(id)
+        weight TEXT
     )`);
+
+    // Add missing columns for existing databases
+    db.run(`ALTER TABLE products ADD COLUMN unit TEXT DEFAULT 'kg'`, () => {});
+    db.run(`ALTER TABLE products ADD COLUMN weight_options TEXT DEFAULT '1kg'`, () => {});
+    db.run(`ALTER TABLE orders ADD COLUMN delivery_slot TEXT`, () => {});
+    db.run(`ALTER TABLE order_items ADD COLUMN weight TEXT`, () => {});
 
     // Insert sample products if none exist
     db.get(`SELECT COUNT(*) as count FROM products`, (err, row) => {
@@ -126,14 +116,10 @@ db.serialize(() => {
             
             const stmt = db.prepare(`INSERT INTO products (name, description, price, stock, image_url, category, unit, weight_options) VALUES (?,?,?,?,?,?,?,?)`);
             for (const v of veggies) {
-                stmt.run(v, (err) => {
-                    if (err) console.error('Error inserting:', err.message);
-                });
+                stmt.run(v);
             }
             stmt.finalize();
             console.log('✅ Sample products inserted.');
-        } else {
-            console.log(`📊 Existing database found: ${row.count} products.`);
         }
     });
 });
@@ -143,7 +129,7 @@ function isAdmin(req, res, next) {
     else return res.status(401).json({ error: 'Unauthorized' });
 }
 
-// ==================== CUSTOMER API ENDPOINTS ====================
+// ==================== CUSTOMER API ====================
 app.get('/api/products', async (req, res) => {
     try {
         const rows = await dbAll(`SELECT id, name, price, stock, image_url, category, unit, weight_options FROM products`);
@@ -159,14 +145,6 @@ app.post('/api/orders', async (req, res) => {
     if (!items || items.length === 0) return res.status(400).json({ error: 'No items' });
     
     try {
-        // Check stock
-        for (let item of items) {
-            const prod = await dbGet(`SELECT stock FROM products WHERE id = ?`, [item.productId]);
-            if (!prod || prod.stock < item.quantity) {
-                return res.status(400).json({ error: `Insufficient stock for product ID ${item.productId}` });
-            }
-        }
-        
         const total = totalAmount || items.reduce((s, i) => s + i.price * i.quantity, 0);
         const orderResult = await dbRun(
             `INSERT INTO orders (customer_name, customer_phone, customer_address, total_amount, delivery_slot) VALUES (?,?,?,?,?)`,
@@ -174,11 +152,12 @@ app.post('/api/orders', async (req, res) => {
         );
         const orderId = orderResult.lastID;
         
-        const insertItem = db.prepare(`INSERT INTO order_items (order_id, product_id, quantity, price, weight) VALUES (?,?,?,?,?)`);
         for (let it of items) {
-            insertItem.run(orderId, it.productId, it.quantity, it.price, it.weight || null);
+            await dbRun(
+                `INSERT INTO order_items (order_id, product_id, quantity, price, weight) VALUES (?,?,?,?,?)`,
+                [orderId, it.productId, it.quantity, it.price, it.weight || null]
+            );
         }
-        insertItem.finalize();
         
         const UPI_ID = "9029186608@okbizaxis";
         const upiUrl = `upi://pay?pa=${UPI_ID}&pn=Dad%20Veg%20Shop&am=${total}&cu=INR&tn=Order%20${orderId}`;
@@ -198,14 +177,14 @@ app.get('/api/orders/:phone', async (req, res) => {
             `SELECT id, order_status, payment_status, total_amount, delivery_slot, created_at FROM orders WHERE customer_phone = ? ORDER BY id DESC`,
             [req.params.phone]
         );
-        if (!orders || orders.length === 0) return res.status(404).json({ error: 'No orders found for this number' });
+        if (!orders || orders.length === 0) return res.status(404).json({ error: 'No orders found' });
         res.json(orders);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-// ==================== ADMIN API ENDPOINTS ====================
+// ==================== ADMIN API ====================
 app.post('/admin/login', (req, res) => {
     const { password } = req.body;
     if (password === ADMIN_PASSWORD) {
@@ -264,10 +243,6 @@ app.delete('/api/admin/products/:id', isAdmin, async (req, res) => {
 app.get('/api/admin/orders', isAdmin, async (req, res) => {
     try {
         const orders = await dbAll(`SELECT * FROM orders ORDER BY id DESC`);
-        for (let order of orders) {
-            const items = await dbAll(`SELECT product_id, quantity, price, weight FROM order_items WHERE order_id = ?`, [order.id]);
-            order.items = items;
-        }
         res.json(orders);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -275,20 +250,8 @@ app.get('/api/admin/orders', isAdmin, async (req, res) => {
 });
 
 app.put('/api/admin/orders/:id/pay', isAdmin, async (req, res) => {
-    const orderId = req.params.id;
     try {
-        const order = await dbGet(`SELECT payment_status, customer_phone, total_amount FROM orders WHERE id = ?`, [orderId]);
-        if (!order) return res.status(404).json({ error: 'Order not found' });
-        if (order.payment_status === 'paid') return res.json({ message: 'Already paid' });
-        
-        const items = await dbAll(`SELECT product_id, quantity FROM order_items WHERE order_id = ?`, [orderId]);
-        for (let it of items) {
-            const prod = await dbGet(`SELECT stock FROM products WHERE id = ?`, [it.product_id]);
-            if (prod.stock < it.quantity) return res.status(400).json({ error: 'Stock insufficient' });
-            await dbRun(`UPDATE products SET stock = stock - ? WHERE id = ?`, [it.quantity, it.product_id]);
-        }
-        await dbRun(`UPDATE orders SET payment_status = 'paid', order_status = 'confirmed' WHERE id = ?`, [orderId]);
-        
+        await dbRun(`UPDATE orders SET payment_status = 'paid', order_status = 'confirmed' WHERE id = ?`, [req.params.id]);
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -313,62 +276,24 @@ app.put('/api/admin/orders/:id/deliver', isAdmin, async (req, res) => {
     }
 });
 
-// ==================== BULK PRODUCT UPLOAD ====================
-app.get('/api/admin/products/template', isAdmin, (req, res) => {
-    const templateHeaders = ['name', 'price', 'stock', 'unit', 'weight_options', 'category', 'image_url', 'description'];
-    let csvContent = templateHeaders.join(',') + '\n';
-    csvContent += 'Tomato,40,100,kg,"250g,500g,1kg",Vegetables,,Fresh red tomatoes\n';
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', 'attachment; filename="product_template.csv"');
-    res.send(csvContent);
-});
-
-const csvUpload = multer({ dest: 'uploads/' });
-app.post('/api/admin/products/bulk', isAdmin, csvUpload.single('csvFile'), async (req, res) => {
-    try {
-        if (!req.file) return res.status(400).json({ error: 'No CSV file uploaded' });
-        
-        const results = [];
-        await new Promise((resolve, reject) => {
-            fs.createReadStream(req.file.path)
-                .pipe(csv())
-                .on('data', (data) => results.push(data))
-                .on('end', resolve)
-                .on('error', reject);
-        });
-        
-        const insertedProducts = [];
-        for (const row of results) {
-            if (!row.name || !row.price || !row.stock) continue;
-            
-            const result = await dbRun(
-                `INSERT INTO products (name, description, price, stock, image_url, category, unit, weight_options) VALUES (?,?,?,?,?,?,?,?)`,
-                [row.name.trim(), row.description || '', parseFloat(row.price), parseInt(row.stock), row.image_url || '', row.category || 'Vegetables', row.unit || 'kg', row.weight_options || '250g,500g,1kg']
-            );
-            insertedProducts.push({ id: result.lastID, name: row.name });
-        }
-        
-        fs.unlinkSync(req.file.path);
-        res.json({ success: true, message: `${insertedProducts.length} products added`, inserted: insertedProducts });
-    } catch (error) {
-        if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-        res.status(500).json({ error: 'Bulk upload failed: ' + error.message });
-    }
-});
-
-// ==================== IMAGE UPLOAD ====================
-app.post('/api/upload-image', upload.single('image'), async (req, res) => {
-    try {
-        if (!req.file) return res.status(400).json({ success: false, error: 'No image file' });
-        const extension = req.file.originalname.split('.').pop();
-        const filename = `${Date.now()}_upload.${extension}`;
-        const localPath = `/product_images/${filename}`;
-        const filePath = path.join(__dirname, 'public', localPath);
-        fs.writeFileSync(filePath, req.file.buffer);
-        res.json({ success: true, url: localPath });
-    } catch (error) {
-        res.status(500).json({ success: false, error: 'Upload failed' });
-    }
+// ==================== FIX DATABASE ENDPOINT ====================
+app.get('/api/fix-database', isAdmin, (req, res) => {
+    const fixes = [];
+    
+    db.run(`ALTER TABLE products ADD COLUMN unit TEXT DEFAULT 'kg'`, (err) => {
+        fixes.push(err ? 'unit column already exists' : 'unit column added');
+    });
+    db.run(`ALTER TABLE products ADD COLUMN weight_options TEXT DEFAULT '1kg'`, (err) => {
+        fixes.push(err ? 'weight_options column already exists' : 'weight_options column added');
+    });
+    db.run(`ALTER TABLE orders ADD COLUMN delivery_slot TEXT`, (err) => {
+        fixes.push(err ? 'delivery_slot column already exists' : 'delivery_slot column added');
+    });
+    db.run(`ALTER TABLE order_items ADD COLUMN weight TEXT`, (err) => {
+        fixes.push(err ? 'weight column already exists' : 'weight column added');
+    });
+    
+    res.json({ success: true, message: 'Database fixes applied', details: fixes });
 });
 
 // ==================== SET ONLINE IMAGES ====================
@@ -384,16 +309,13 @@ app.get('/api/set-online-images', isAdmin, async (req, res) => {
     
     for (const [id, url] of Object.entries(images)) {
         await dbRun(`UPDATE products SET image_url = ? WHERE id = ?`, [url, id]);
-        console.log(`✅ Updated product ${id} with online image`);
     }
     
     res.json({ success: true, message: 'Online images set for all products!' });
 });
 
 // ==================== HEALTH & PAGE ROUTES ====================
-app.get('/healthz', (req, res) => {
-    res.status(200).send('OK');
-});
+app.get('/healthz', (req, res) => { res.status(200).send('OK'); });
 
 app.get('/admin-page', (req, res) => {
     if (req.session && req.session.admin) {
