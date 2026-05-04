@@ -96,7 +96,7 @@ db.serialize(() => {
 
     // Insert sample products if none exist
     db.get(`SELECT COUNT(*) as count FROM products`, (err, row) => {
-        if (row.count === 0) {
+        if (row && row.count === 0) {
             console.log('📦 Inserting sample products...');
             const veggies = [
                 ['Tomato', 'Fresh red tomatoes', 40, 100, 'https://cdn.pixabay.com/photo/2020/06/01/13/55/tomatoes-5247827_640.jpg', 'Vegetables', 'kg', '250g,500g,1kg'],
@@ -115,7 +115,7 @@ db.serialize(() => {
 });
 
 function isAdmin(req, res, next) {
-    if (req.session?.admin) return next();
+    if (req.session && req.session.admin) return next();
     else return res.status(401).json({ error: 'Unauthorized' });
 }
 
@@ -132,7 +132,7 @@ app.get('/api/products', async (req, res) => {
 
 app.post('/api/orders', async (req, res) => {
     const { customerName, customerPhone, customerAddress, items, deliverySlot, totalAmount } = req.body;
-    if (!items?.length) return res.status(400).json({ error: 'No items' });
+    if (!items || !items.length) return res.status(400).json({ error: 'No items' });
     
     try {
         const total = totalAmount || items.reduce((s, i) => s + i.price * i.quantity, 0);
@@ -164,7 +164,7 @@ app.post('/api/orders', async (req, res) => {
 app.get('/api/orders/:phone', async (req, res) => {
     try {
         const orders = await dbAll(`SELECT id, order_status, payment_status, total_amount, delivery_slot, created_at FROM orders WHERE customer_phone = ? ORDER BY id DESC`, [req.params.phone]);
-        if (!orders?.length) return res.status(404).json({ error: 'No orders found' });
+        if (!orders || !orders.length) return res.status(404).json({ error: 'No orders found' });
         res.json(orders);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -231,6 +231,27 @@ app.put('/api/admin/orders/:id/deliver', isAdmin, async (req, res) => {
     res.json({ success: true });
 });
 
+// ==================== BULK FETCH IMAGES ENDPOINT ====================
+app.post('/api/admin/bulk-fetch-images', isAdmin, async (req, res) => {
+    try {
+        const products = await dbAll(`SELECT id, name, image_url FROM products`);
+        
+        let updated = 0;
+        for (const product of products) {
+            // Only update if no image or placeholder
+            if (!product.image_url || product.image_url === '' || product.image_url.includes('placeholder')) {
+                const imageUrl = `https://cdn.pixabay.com/photo/2020/06/01/13/55/tomatoes-5247827_640.jpg`;
+                await dbRun(`UPDATE products SET image_url = ? WHERE id = ?`, [imageUrl, product.id]);
+                updated++;
+            }
+        }
+        
+        res.json({ success: true, message: `Updated ${updated} products`, total: products.length, updated: updated });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 // ==================== FIX DATABASE ENDPOINT ====================
 app.get('/api/fix-database', isAdmin, (req, res) => {
     db.run(`ALTER TABLE products ADD COLUMN unit TEXT DEFAULT 'kg'`, () => {});
@@ -250,7 +271,9 @@ app.get('/api/set-online-images', isAdmin, async (req, res) => {
         5: 'https://cdn.pixabay.com/photo/2016/03/26/16/44/spinach-1280831_640.jpg',
         6: 'https://cdn.pixabay.com/photo/2016/07/24/17/33/cucumber-1538652_640.jpg'
     };
-    for (const [id, url] of Object.entries(images)) await dbRun(`UPDATE products SET image_url = ? WHERE id = ?`, [url, id]);
+    for (const [id, url] of Object.entries(images)) {
+        await dbRun(`UPDATE products SET image_url = ? WHERE id = ?`, [url, id]);
+    }
     res.json({ success: true, message: 'Online images set for all products!' });
 });
 
@@ -258,7 +281,7 @@ app.get('/api/set-online-images', isAdmin, async (req, res) => {
 app.get('/healthz', (req, res) => res.status(200).send('OK'));
 
 app.get('/admin-page', (req, res) => {
-    if (req.session?.admin) {
+    if (req.session && req.session.admin) {
         res.sendFile(path.join(__dirname, 'public', 'admin.html'));
     } else {
         res.send(`<html><body style="font-family:sans-serif;text-align:center;margin-top:100px"><h2>Admin Login</h2><form id="loginForm"><input type="password" id="pwd" placeholder="Enter password" /><button type="submit">Login</button></form><script>document.getElementById('loginForm').onsubmit=async(e)=>{e.preventDefault();const pwd=document.getElementById('pwd').value;const r=await fetch('/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pwd})});if(r.ok) location.reload();else alert('Wrong password');};<\/script></body></html>`);
